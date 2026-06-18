@@ -1,5 +1,5 @@
-boto3
-faker
-numpy
-python-dateutil
-scipy
+boto3~=1.35.0
+faker~=28.0.0
+numpy~=2.0.0
+python-dateutil~=2.9.0
+scipy~=1.14.0

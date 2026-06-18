@@ -1,2 +1,4 @@
-scipy
-numpy
+# Local test dependencies only.
+# scipy and numpy are provided at runtime by the AWSSDKPandas-Python312-Arm64 Lambda layer.
+scipy~=1.14.0
+numpy~=2.0.0
