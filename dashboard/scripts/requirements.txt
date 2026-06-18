@@ -1,0 +1,5 @@
+boto3
+faker
+numpy
+python-dateutil
+scipy

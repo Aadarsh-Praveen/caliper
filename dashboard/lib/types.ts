@@ -63,7 +63,7 @@ export interface ExperimentResults {
   lift_ci: [number, number] | null;
   p_value: number | null;
   is_significant: boolean;
-  srm_flag: null;
+  srm_flag: { observed: Record<string, number>; expected: Record<string, number>; chi2_stat: number; p_value: number } | null;
   segments: never[];
   readout: null;
 }

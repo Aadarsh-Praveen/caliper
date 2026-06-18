@@ -1,8 +1,9 @@
 import { corsResponse, corsOptionsResponse } from "@/lib/cors";
 import { getApiKeyFromRequest, getCustomerByApiKey } from "@/lib/auth";
 import { queryOne } from "@/lib/postgres";
-import { getSummary } from "@/lib/dynamodb";
+import { getSummary, ddb, tableName } from "@/lib/dynamodb";
 import { twoProportionZTest } from "@/lib/stats";
+import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import type { Experiment, ExperimentResults, VariantStats } from "@/lib/types";
 import type { NextRequest } from "next/server";
 
@@ -57,6 +58,31 @@ export async function GET(
     );
   }
 
+  // Read pre-computed SRM flag (written by aggregator Lambda)
+  let srm_flag = null;
+  try {
+    const srmResp = await ddb.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: `EXP#${experiment.slug}`, SK: "SRM#detected" },
+      })
+    );
+    if (srmResp.Item) {
+      srm_flag = {
+        observed: Object.fromEntries(
+          Object.entries(srmResp.Item.observed as Record<string, number>).map(([k, v]) => [k, Number(v)])
+        ),
+        expected: Object.fromEntries(
+          Object.entries(srmResp.Item.expected as Record<string, number>).map(([k, v]) => [k, Number(v)])
+        ),
+        chi2_stat: Number(srmResp.Item.chi2_stat),
+        p_value: Number(srmResp.Item.p_value),
+      };
+    }
+  } catch {
+    // SRM flag is optional; don't fail the request
+  }
+
   const results: ExperimentResults = {
     experiment,
     variants: variantStats,
@@ -64,7 +90,7 @@ export async function GET(
     lift_ci: statsResult?.lift_ci ?? null,
     p_value: statsResult?.p_value ?? null,
     is_significant: statsResult?.is_significant ?? false,
-    srm_flag: null,
+    srm_flag,
     segments: [],
     readout: null,
   };
