@@ -66,32 +66,50 @@ export async function batchPutEvents(
     const batch = events.slice(i, i + BATCH_SIZE);
     const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
-    await ddb.send(
-      new BatchWriteCommand({
-        RequestItems: {
-          [tableName]: batch.map((e) => {
-            const tsMs = new Date(e.ts).getTime();
-            return {
-              PutRequest: {
-                Item: {
-                  PK: `EXP#${e.experimentId}`,
-                  SK: `EVT#${tsMs}#${e.userId}`,
-                  GSI1PK: `USER#${e.userId}`,
-                  GSI1SK: `EVT#${tsMs}`,
-                  experimentId: e.experimentId,
-                  userId: e.userId,
-                  eventName: e.eventName,
-                  properties: e.properties,
-                  context: e.context,
-                  ts: e.ts,
-                  expires_at: expiresAt,
-                },
-              },
-            };
-          }),
+    const requests = batch.map((e) => {
+      const tsMs = new Date(e.ts).getTime();
+      return {
+        PutRequest: {
+          Item: {
+            PK: `EXP#${e.experimentId}`,
+            SK: `EVT#${tsMs}#${e.userId}`,
+            GSI1PK: `USER#${e.userId}`,
+            GSI1SK: `EVT#${tsMs}`,
+            experimentId: e.experimentId,
+            userId: e.userId,
+            eventName: e.eventName,
+            properties: e.properties,
+            context: e.context,
+            ts: e.ts,
+            expires_at: expiresAt,
+          },
         },
-      })
+      };
+    });
+
+    const keys = requests.map((r) => ({
+      PK: r.PutRequest.Item.PK,
+      SK: r.PutRequest.Item.SK,
+    }));
+    console.log("[batchPutEvents] keys in batch:", JSON.stringify(keys));
+
+    const dupes = keys.filter(
+      (k, idx) => keys.findIndex((x) => x.PK === k.PK && x.SK === k.SK) !== idx
     );
+    if (dupes.length > 0) {
+      console.error("[batchPutEvents] DUPLICATE KEYS DETECTED:", JSON.stringify(dupes));
+    }
+
+    try {
+      await ddb.send(
+        new BatchWriteCommand({
+          RequestItems: { [tableName]: requests },
+        })
+      );
+    } catch (err) {
+      console.error("[batchPutEvents] BatchWriteCommand failed. Keys:", JSON.stringify(keys), "Error:", err);
+      throw err;
+    }
   }
 }
 
