@@ -36,7 +36,7 @@ export async function putEvent(
       TableName: tableName,
       Item: {
         PK: `EXP#${experimentId}`,
-        SK: `EVT#${tsMs}#${userId}`,
+        SK: `EVT#${tsMs}#${userId}#${eventName}`,
         GSI1PK: `USER#${userId}`,
         GSI1SK: `EVT#${tsMs}`,
         experimentId,
@@ -61,55 +61,44 @@ export async function batchPutEvents(
     ts: string;
   }>
 ) {
-  const BATCH_SIZE = 25;
-  for (let i = 0; i < events.length; i += BATCH_SIZE) {
-    const batch = events.slice(i, i + BATCH_SIZE);
-    const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+  const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
-    const requests = batch.map((e) => {
-      const tsMs = new Date(e.ts).getTime();
-      return {
-        PutRequest: {
-          Item: {
-            PK: `EXP#${e.experimentId}`,
-            SK: `EVT#${tsMs}#${e.userId}`,
-            GSI1PK: `USER#${e.userId}`,
-            GSI1SK: `EVT#${tsMs}`,
-            experimentId: e.experimentId,
-            userId: e.userId,
-            eventName: e.eventName,
-            properties: e.properties,
-            context: e.context,
-            ts: e.ts,
-            expires_at: expiresAt,
-          },
+  // Dedup across the full input: same (experiment, user, ts, eventName) → last-write-wins.
+  // Protects against client-side double-fires while allowing distinct event types at the same ms.
+  const dedupMap = new Map<string, { PutRequest: { Item: Record<string, unknown> } }>();
+  for (const e of events) {
+    const tsMs = new Date(e.ts).getTime();
+    const PK = `EXP#${e.experimentId}`;
+    const SK = `EVT#${tsMs}#${e.userId}#${e.eventName}`;
+    dedupMap.set(`${PK}|${SK}`, {
+      PutRequest: {
+        Item: {
+          PK,
+          SK,
+          GSI1PK: `USER#${e.userId}`,
+          GSI1SK: `EVT#${tsMs}`,
+          experimentId: e.experimentId,
+          userId: e.userId,
+          eventName: e.eventName,
+          properties: e.properties,
+          context: e.context,
+          ts: e.ts,
+          expires_at: expiresAt,
         },
-      };
+      },
     });
+  }
 
-    const keys = requests.map((r) => ({
-      PK: r.PutRequest.Item.PK,
-      SK: r.PutRequest.Item.SK,
-    }));
-    console.log("[batchPutEvents] keys in batch:", JSON.stringify(keys));
+  const allRequests = Array.from(dedupMap.values());
 
-    const dupes = keys.filter(
-      (k, idx) => keys.findIndex((x) => x.PK === k.PK && x.SK === k.SK) !== idx
+  const BATCH_SIZE = 25;
+  for (let i = 0; i < allRequests.length; i += BATCH_SIZE) {
+    const batch = allRequests.slice(i, i + BATCH_SIZE);
+    await ddb.send(
+      new BatchWriteCommand({
+        RequestItems: { [tableName]: batch },
+      })
     );
-    if (dupes.length > 0) {
-      console.error("[batchPutEvents] DUPLICATE KEYS DETECTED:", JSON.stringify(dupes));
-    }
-
-    try {
-      await ddb.send(
-        new BatchWriteCommand({
-          RequestItems: { [tableName]: requests },
-        })
-      );
-    } catch (err) {
-      console.error("[batchPutEvents] BatchWriteCommand failed. Keys:", JSON.stringify(keys), "Error:", err);
-      throw err;
-    }
   }
 }
 

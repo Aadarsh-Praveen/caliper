@@ -119,7 +119,7 @@ def simulate_experiment(
             ts_ms = int(dt2.timestamp() * 1000)
             return {
                 "PK": f"EXP#{exp_id}",
-                "SK": f"EVT#{ts_ms}#{user_id}",
+                "SK": f"EVT#{ts_ms}#{user_id}#{event_name}",
                 "GSI1PK": f"USER#{user_id}",
                 "GSI1SK": f"EVT#{ts_ms}",
                 "event_name": event_name,
