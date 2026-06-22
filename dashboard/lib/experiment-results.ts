@@ -1,8 +1,8 @@
 import { getSummary, ddb, tableName } from "@/lib/dynamodb";
 import { twoProportionZTest } from "@/lib/stats";
-import { queryOne } from "@/lib/postgres";
+import { query, queryOne } from "@/lib/postgres";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
-import type { Experiment, ExperimentResults, VariantStats, Readout } from "@/lib/types";
+import type { Experiment, ExperimentResults, VariantStats, Readout, SegmentRow } from "@/lib/types";
 
 export async function computeExperimentResults(
   experiment: Experiment
@@ -119,10 +119,19 @@ export async function computeExperimentResults(
     // mSPRT stats are optional
   }
 
-  const latestReadout = await queryOne<Readout>(
-    `SELECT * FROM readouts WHERE experiment_id = $1 ORDER BY generated_at DESC LIMIT 1`,
-    [experiment.id]
-  );
+  const [latestReadout, segments] = await Promise.all([
+    queryOne<Readout>(
+      `SELECT * FROM readouts WHERE experiment_id = $1 ORDER BY generated_at DESC LIMIT 1`,
+      [experiment.id]
+    ),
+    query<SegmentRow>(
+      `SELECT segment_dimension, segment_value, variant, n, conversions, conversion_rate
+       FROM mart_segment_results
+       WHERE experiment_id = $1
+       ORDER BY segment_dimension, segment_value, variant`,
+      [experiment.slug]
+    ).catch(() => [] as SegmentRow[]),
+  ]);
 
   return {
     experiment,
@@ -135,7 +144,7 @@ export async function computeExperimentResults(
     msprt_should_stop,
     is_significant: statsResult?.is_significant ?? false,
     srm_flag,
-    segments: [],
+    segments,
     readout: latestReadout ?? null,
   };
 }

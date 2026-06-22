@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Synthetic data generator for Caliper demo.
-Writes ~10,000 events across three experiments directly to DynamoDB.
+Writes ~10,000 events across three experiments to DynamoDB and Aurora.
 """
 import argparse
+import json
+import os
 import random
 import time
 import uuid
@@ -14,6 +16,7 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Key
 import numpy as np
+import psycopg
 
 SEED = 42
 random.seed(SEED)
@@ -241,6 +244,54 @@ def write_summary_items(table, exp_id: str, summary_counts: dict[str, dict[str, 
         )
 
 
+def get_aurora_conn() -> psycopg.Connection:
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise SystemExit("DATABASE_URL env var not set — cannot write to Aurora")
+    # Ensure SSL; add sslmode=require if not already present
+    if "sslmode" not in database_url:
+        sep = "&" if "?" in database_url else "?"
+        database_url += f"{sep}sslmode=require"
+    return psycopg.connect(database_url)
+
+
+def truncate_aurora(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("TRUNCATE raw_events, raw_assignments")
+    conn.commit()
+
+
+def write_to_aurora(conn: psycopg.Connection, events_batch: list[dict], assignments_batch: list[dict]) -> None:
+    """Bulk insert into raw_events and raw_assignments using COPY."""
+    with conn.cursor() as cur:
+        with cur.copy(
+            "COPY raw_events (experiment_id, user_id, variant, event_name, properties, context, ts) FROM STDIN"
+        ) as copy:
+            for e in events_batch:
+                copy.write_row((
+                    e["experiment_id"],
+                    e["user_id"],
+                    e["variant"],
+                    e["event_name"],
+                    json.dumps(e.get("properties", {})),
+                    json.dumps(e.get("context", {})),
+                    e["ts"],
+                ))
+
+        with cur.copy(
+            "COPY raw_assignments (experiment_id, user_id, variant, pre_experiment_activity, assigned_at) FROM STDIN"
+        ) as copy:
+            for a in assignments_batch:
+                copy.write_row((
+                    a["experiment_id"],
+                    a["user_id"],
+                    a["variant"],
+                    float(a.get("pre_experiment_activity", 0)),
+                    a["assigned_at"],
+                ))
+    conn.commit()
+
+
 def batch_write(table, items: list[dict]) -> None:
     """Write items in batches of 25 using batch_writer.
 
@@ -258,6 +309,7 @@ def main() -> None:
     parser.add_argument("--n-users", type=int, default=3333, help="Users per experiment")
     parser.add_argument("--days-back", type=int, default=7, help="Spread events over this many past days")
     parser.add_argument("--verbose", action="store_true", help="Print per-experiment breakdown")
+    parser.add_argument("--skip-aurora", action="store_true", help="Skip Aurora writes (DynamoDB only)")
     args = parser.parse_args()
 
     dynamodb = boto3.resource("dynamodb", region_name=REGION)
@@ -277,8 +329,19 @@ def main() -> None:
     for exp_id in EXPERIMENTS:
         total_cleaned += cleanup_experiment_data(table, exp_id, verbose=args.verbose)
 
+    # Open Aurora connection early so we can TRUNCATE before any writes
+    aurora_conn = None
+    if not args.skip_aurora:
+        if args.verbose:
+            print("Truncating Aurora raw_events and raw_assignments...")
+        aurora_conn = get_aurora_conn()
+        truncate_aurora(aurora_conn)
+
     if args.verbose:
         print(f"\nGenerating data for {args.n_users:,} users per experiment over {args.days_back} days...")
+
+    all_aurora_events: list[dict] = []
+    all_aurora_assignments: list[dict] = []
 
     for exp_id, cfg in EXPERIMENTS.items():
         events, assignments, summary_counts = simulate_experiment(
@@ -296,9 +359,18 @@ def main() -> None:
         batch_write(table, assignments)
         write_summary_items(table, exp_id, summary_counts)
 
+        all_aurora_events.extend(events)
+        all_aurora_assignments.extend(assignments)
+
         total_events += len(events)
         total_users += args.n_users
         total_assignments += len(assignments)
+
+    if aurora_conn is not None:
+        if args.verbose:
+            print(f"Writing {len(all_aurora_events):,} events and {len(all_aurora_assignments):,} assignments to Aurora via COPY...")
+        write_to_aurora(aurora_conn, all_aurora_events, all_aurora_assignments)
+        aurora_conn.close()
 
     elapsed = time.time() - start
     if total_cleaned:
@@ -308,6 +380,8 @@ def main() -> None:
         for exp_id in EXPERIMENTS:
             print(f"  {exp_id}")
     print(f"✓ Wrote {total_assignments:,} assignment records")
+    if not args.skip_aurora:
+        print(f"✓ Aurora: {len(all_aurora_events):,} events + {len(all_aurora_assignments):,} assignments written")
     print(f"✓ Total runtime: {elapsed:.1f}s")
 
 

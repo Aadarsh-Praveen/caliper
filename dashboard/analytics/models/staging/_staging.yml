@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_events
+    description: "Cleaned events with device and country extracted from context."
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: device
+      - name: country
+
+  - name: stg_assignments
+    description: "Cleaned assignments — one row per user per experiment."
+    columns:
+      - name: assignment_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]

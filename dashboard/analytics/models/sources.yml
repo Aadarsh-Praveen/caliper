@@ -1,0 +1,39 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: public
+    description: "Raw event and assignment data from Caliper SDK"
+    tables:
+      - name: raw_events
+        description: "Every event fired by the Caliper SDK, written by the synthetic data generator (for the hackathon demo) and by the ingestion API in production."
+        columns:
+          - name: event_id
+            tests: [unique, not_null]
+          - name: experiment_id
+            tests: [not_null]
+          - name: user_id
+            tests: [not_null]
+          - name: variant
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['control', 'treatment']
+          - name: event_name
+            tests: [not_null]
+          - name: ts
+            tests: [not_null]
+
+      - name: raw_assignments
+        description: "One row per user per experiment — the variant assignment from the SDK."
+        columns:
+          - name: assignment_id
+            tests: [unique, not_null]
+          - name: experiment_id
+            tests: [not_null]
+          - name: user_id
+            tests: [not_null]
+          - name: variant
+            tests:
+              - accepted_values:
+                  values: ['control', 'treatment']

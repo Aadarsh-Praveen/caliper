@@ -70,6 +70,15 @@ export interface Readout {
   model_id: string;
 }
 
+export interface SegmentRow {
+  segment_dimension: string;
+  segment_value: string;
+  variant: string;
+  n: number;
+  conversions: number;
+  conversion_rate: number;
+}
+
 export interface ExperimentResults {
   experiment: Experiment;
   variants: VariantStats[];
@@ -81,7 +90,7 @@ export interface ExperimentResults {
   msprt_should_stop: boolean;
   is_significant: boolean;
   srm_flag: { observed: Record<string, number>; expected: Record<string, number>; chi2_stat: number; p_value: number } | null;
-  segments: never[];
+  segments: SegmentRow[];
   readout: Readout | null;
 }
 

@@ -1,0 +1,13 @@
+caliper:
+  target: prod
+  outputs:
+    prod:
+      type: postgres
+      host: "{{ env_var('AURORA_HOST') }}"
+      port: 5432
+      user: "{{ env_var('AURORA_USER') }}"
+      password: "{{ env_var('AURORA_PASSWORD') }}"
+      dbname: caliper
+      schema: public
+      sslmode: require
+      threads: 1

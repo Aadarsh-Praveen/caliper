@@ -376,7 +376,7 @@ export default function ExperimentDetailPage({
         <h2 className="text-xs text-[#888888] uppercase tracking-wider mb-3">
           Segment breakdown
         </h2>
-        <SegmentTable />
+        <SegmentTable segments={results.segments} />
       </div>
     </div>
   );

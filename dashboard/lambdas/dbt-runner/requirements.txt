@@ -1,0 +1,2 @@
+# Dependencies are installed in the Dockerfile via pip install dbt-core dbt-postgres.
+# This file is a placeholder; nothing is installed from here.

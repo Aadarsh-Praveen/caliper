@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: mart_segment_results
+    description: "Per-experiment, per-variant, per-segment conversion rates. Read by the Caliper dashboard's segment breakdown card."
+    columns:
+      - name: experiment_id
+        tests: [not_null]
+      - name: variant
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['control', 'treatment']
+      - name: segment_dimension
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['device', 'country']
+      - name: segment_value
+        tests: [not_null]
+      - name: n
+        tests: [not_null]
