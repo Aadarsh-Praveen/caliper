@@ -8,6 +8,7 @@ import { StatsCard } from "@/components/experiments/StatsCard";
 import { SRMWarningBanner } from "@/components/experiments/SRMWarningBanner";
 import { ConfidenceBandChart } from "@/components/experiments/ConfidenceBandChart";
 import { SegmentTable } from "@/components/experiments/SegmentTable";
+import { ReadoutCard } from "@/components/experiments/ReadoutCard";
 import type { ExperimentResults } from "@/lib/types";
 
 const DEMO_API_KEY = "caliper_demo_key_public";
@@ -134,6 +135,7 @@ export default function ExperimentDetailPage({
     msprt_should_stop,
     is_significant,
     srm_flag,
+    readout,
   } = results;
   const control = variants.find((v) => v.name === "control") ?? variants[0];
   const treatment = variants.find((v) => v.name !== "control") ?? variants[1];
@@ -149,9 +151,6 @@ export default function ExperimentDetailPage({
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Bedrock readout placeholder */}
-      {/* Hidden when readout is null per spec */}
-
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
@@ -209,6 +208,15 @@ export default function ExperimentDetailPage({
           )}
         </div>
       </div>
+
+      {/* AI Readout */}
+      {id && (
+        <ReadoutCard
+          experimentId={id}
+          initialReadout={readout}
+          apiKey={DEMO_API_KEY}
+        />
+      )}
 
       {/* SRM warning */}
       {srm_flag && (

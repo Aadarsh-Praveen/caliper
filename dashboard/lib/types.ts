@@ -59,6 +59,17 @@ export interface VariantStats {
   variance_reduction_pct?: number;
 }
 
+export interface Readout {
+  id: string;
+  experiment_id: string;
+  verdict: "treatment_wins" | "control_wins" | "no_significant_difference" | "srm_invalidated" | "insufficient_data";
+  summary: string;
+  recommendation: string;
+  confidence: "high" | "medium" | "low";
+  generated_at: string;
+  model_id: string;
+}
+
 export interface ExperimentResults {
   experiment: Experiment;
   variants: VariantStats[];
@@ -71,7 +82,7 @@ export interface ExperimentResults {
   is_significant: boolean;
   srm_flag: { observed: Record<string, number>; expected: Record<string, number>; chi2_stat: number; p_value: number } | null;
   segments: never[];
-  readout: null;
+  readout: Readout | null;
 }
 
 export interface Summary {

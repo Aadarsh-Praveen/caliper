@@ -98,5 +98,15 @@ export async function PATCH(
   }
 
   const updated = await queryOne<Experiment>(updateQuery, sqlParams);
+
+  if (newStatus === "stopped" || newStatus === "completed") {
+    fetch(`${req.nextUrl.origin}/api/experiments/${id}/readout`, {
+      method: "POST",
+      headers: { "X-API-Key": apiKey },
+    }).catch((err) => {
+      console.warn("[Bedrock] Auto-readout failed:", err);
+    });
+  }
+
   return corsResponse(updated);
 }
