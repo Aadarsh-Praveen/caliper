@@ -2,6 +2,10 @@
 Caliper aggregator Lambda — triggered by DynamoDB Streams (batch 100, 5s window).
 Reads EVT# items, increments SUMMARY#variant n/conversions counters (ADD),
 then writes STATS#latest (with mSPRT), STATS#cuped#variant, SRM#detected flags.
+
+SRM is computed on ASSIGN_COUNT#variant counters (unique user assignments),
+not on the SUMMARY#variant.n field which accumulates event counts and can
+produce false positives when users fire multiple experiment_exposed events.
 """
 import os, logging
 from collections import defaultdict
@@ -127,30 +131,67 @@ def _compute_cuped(exp_id: str, now: str) -> None:
 
 def lambda_handler(event, context):
     by_exp = defaultdict(lambda: defaultdict(list))
+    # Counts of new unique assignments per (exp_id, variant) in this batch
+    assign_incs = defaultdict(lambda: defaultdict(int))
+
     records = event.get("Records", [])
     for rec in records:
-        if rec.get("eventName") not in ("INSERT", "MODIFY"):
+        event_name = rec.get("eventName")
+        if event_name not in ("INSERT", "MODIFY"):
             continue
         img = rec.get("dynamodb", {}).get("NewImage", {})
         sk = _s(img.get("SK"))
-        if not sk or not sk.startswith("EVT#"):
+        if not sk:
             continue
-        exp_id = _s(img.get("experiment_id")) or _s(img.get("experimentId"))
-        variant = _s(img.get("variant"))
-        evt = _s(img.get("event_name")) or _s(img.get("eventName"))
-        if exp_id and variant in ("control", "treatment") and evt:
-            by_exp[exp_id][variant].append(evt)
-    for exp_id, v_events in by_exp.items():
+
+        if sk.startswith("EVT#"):
+            exp_id = _s(img.get("experiment_id")) or _s(img.get("experimentId"))
+            variant = _s(img.get("variant"))
+            evt = _s(img.get("event_name")) or _s(img.get("eventName"))
+            if exp_id and variant in ("control", "treatment") and evt:
+                by_exp[exp_id][variant].append(evt)
+
+        elif sk.startswith("ASSIGN#") and event_name == "INSERT":
+            # Only INSERT events — each user gets exactly one ASSIGN# item (ConditionExpression guard)
+            exp_id = _s(img.get("experiment_id")) or _s(img.get("experimentId"))
+            if not exp_id:
+                # Fall back to extracting from PK = "EXP#{exp_id}"
+                pk = _s(img.get("PK"))
+                if pk and pk.startswith("EXP#"):
+                    exp_id = pk[4:]
+            variant = _s(img.get("variant"))
+            if exp_id and variant in ("control", "treatment"):
+                assign_incs[exp_id][variant] += 1
+
+    # Flush assignment counts atomically before running stats so SRM sees up-to-date totals
+    for exp_id, variant_counts in assign_incs.items():
+        for variant, count in variant_counts.items():
+            try:
+                table.update_item(
+                    Key={"PK": f"EXP#{exp_id}", "SK": f"ASSIGN_COUNT#{variant}"},
+                    UpdateExpression="ADD #n :n",
+                    ExpressionAttributeNames={"#n": "n"},
+                    ExpressionAttributeValues={":n": Decimal(count)},
+                )
+            except Exception:
+                logger.exception("Failed to update ASSIGN_COUNT for %s/%s", exp_id, variant)
+
+    # Run full stats + SRM update for all experiments that had new data in this batch
+    all_exps = set(by_exp.keys()) | set(assign_incs.keys())
+    for exp_id in all_exps:
         try:
-            _update(exp_id, v_events)
+            _update(exp_id, by_exp[exp_id])
         except Exception:
             logger.exception("Failed to update %s", exp_id)
-    logger.info("Processed %d records, %d experiments", len(records), len(by_exp))
+
+    logger.info("Processed %d records, %d experiments", len(records), len(all_exps))
     return {"processed": len(records)}
 
 
 def _update(exp_id, v_events):
     pm = PRIMARY_METRICS.get(exp_id)
+
+    # Increment SUMMARY counters from experiment_exposed / primary metric events
     for variant, evts in v_events.items():
         n_inc = sum(1 for e in evts if e == "experiment_exposed")
         c_inc = sum(1 for e in evts if e == pm) if pm else 0
@@ -168,53 +209,64 @@ def _update(exp_id, v_events):
             ExpressionAttributeValues=vals,
         )
 
+    # Read current SUMMARY totals for z-test / mSPRT
     sums = {}
     for variant in ("control", "treatment"):
         it = table.get_item(Key={"PK": f"EXP#{exp_id}", "SK": f"SUMMARY#{variant}"}).get("Item")
         if it:
             sums[variant] = {"n": int(it.get("n", 0)), "conversions": int(it.get("conversions", 0))}
-    if len(sums) < 2:
-        return
 
-    ctrl, trt = sums["control"], sums["treatment"]
-    z, p, lift, ci_lo, ci_hi = two_proportion_z_test(ctrl["conversions"], ctrl["n"], trt["conversions"], trt["n"])
     now = datetime.now(timezone.utc).isoformat()
 
-    # mSPRT always-valid p-value for binary outcomes
-    p_av = msprt_p_value(
-        x1=ctrl["conversions"], n1=ctrl["n"],
-        x2=trt["conversions"], n2=trt["n"],
-    )
-    should_stop = msprt_should_stop(p_av)
+    if len(sums) == 2:
+        ctrl, trt = sums["control"], sums["treatment"]
+        z, p, lift, ci_lo, ci_hi = two_proportion_z_test(ctrl["conversions"], ctrl["n"], trt["conversions"], trt["n"])
 
-    if z is not None:
-        table.put_item(Item={
-            "PK": f"EXP#{exp_id}", "SK": "STATS#latest",
-            "z_stat": Decimal(str(round(z, 6))), "p_value": Decimal(str(round(p, 6))),
-            "lift": Decimal(str(round(lift, 6))), "ci_low": Decimal(str(round(ci_lo, 6))),
-            "ci_high": Decimal(str(round(ci_hi, 6))),
-            "control_n": Decimal(ctrl["n"]), "treatment_n": Decimal(trt["n"]),
-            "msprt_p_value": Decimal(str(round(p_av, 8))),
-            "msprt_should_stop": should_stop,
-            "updated_at": now,
-        })
-        logger.info(
-            "STATS %s: z=%.3f p=%.4f lift=%.4f msprt_p=%.4f stop=%s",
-            exp_id, z, p, lift, p_av, should_stop,
+        p_av = msprt_p_value(
+            x1=ctrl["conversions"], n1=ctrl["n"],
+            x2=trt["conversions"], n2=trt["n"],
         )
+        should_stop = msprt_should_stop(p_av)
 
-    obs = {v: s["n"] for v, s in sums.items() if s["n"] > 0}
-    if len(obs) == 2 and sum(obs.values()) >= 100:
-        chi2, sp, is_srm = srm_check(obs, EXPECTED_PROPORTIONS)
+        if z is not None:
+            table.put_item(Item={
+                "PK": f"EXP#{exp_id}", "SK": "STATS#latest",
+                "z_stat": Decimal(str(round(z, 6))), "p_value": Decimal(str(round(p, 6))),
+                "lift": Decimal(str(round(lift, 6))), "ci_low": Decimal(str(round(ci_lo, 6))),
+                "ci_high": Decimal(str(round(ci_hi, 6))),
+                "control_n": Decimal(ctrl["n"]), "treatment_n": Decimal(trt["n"]),
+                "msprt_p_value": Decimal(str(round(p_av, 8))),
+                "msprt_should_stop": should_stop,
+                "updated_at": now,
+            })
+            logger.info(
+                "STATS %s: z=%.3f p=%.4f lift=%.4f msprt_p=%.4f stop=%s",
+                exp_id, z, p, lift, p_av, should_stop,
+            )
+
+    # SRM: use per-variant assignment counters (one per unique user), not cumulative event counts.
+    # Event counts inflate when a user fires experiment_exposed multiple times.
+    assign_obs = {}
+    for variant in ("control", "treatment"):
+        it = table.get_item(
+            Key={"PK": f"EXP#{exp_id}", "SK": f"ASSIGN_COUNT#{variant}"}
+        ).get("Item")
+        if it:
+            n = int(it.get("n", 0))
+            if n > 0:
+                assign_obs[variant] = n
+
+    if len(assign_obs) == 2 and sum(assign_obs.values()) >= 100:
+        chi2, sp, is_srm = srm_check(assign_obs, EXPECTED_PROPORTIONS)
         if is_srm:
             table.put_item(Item={
                 "PK": f"EXP#{exp_id}", "SK": "SRM#detected",
                 "chi2_stat": Decimal(str(round(chi2, 6))), "p_value": Decimal(str(round(sp, 9))),
-                "observed": {k: Decimal(v) for k, v in obs.items()},
+                "observed": {k: Decimal(v) for k, v in assign_obs.items()},
                 "expected": {k: Decimal(str(v)) for k, v in EXPECTED_PROPORTIONS.items()},
                 "detected_at": now,
             })
-            logger.warning("SRM for %s: chi2=%.2f p=%.2e", exp_id, chi2, sp)
+            logger.warning("SRM for %s: chi2=%.2f p=%.2e obs=%s", exp_id, chi2, sp, assign_obs)
         else:
             try:
                 table.delete_item(Key={"PK": f"EXP#{exp_id}", "SK": "SRM#detected"})

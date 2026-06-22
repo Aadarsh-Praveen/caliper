@@ -68,14 +68,14 @@ def _gammaincc(a: float, x: float) -> float:
 def srm_check(
     observed_counts: "dict[str, int]",
     expected_proportions: "dict[str, float]",
-    alpha: float = 0.001,
+    alpha: float = 0.0001,
 ) -> "tuple[float, float, bool]":
     """
     Chi-squared test for sample ratio mismatch.
 
     observed_counts: {"control": 5234, "treatment": 4766}
     expected_proportions: {"control": 0.5, "treatment": 0.5}
-    alpha: significance level for SRM detection (default 0.001 — conservative)
+    alpha: significance level for SRM detection (default 0.0001 — matches Statsig/Eppo production)
 
     Returns: (chi2_stat, p_value, is_srm)
     """
