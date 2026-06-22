@@ -100,11 +100,12 @@ def simulate_experiment(
         else:
             variant = assign_variant_hash(user_id, exp_id)
 
-        # Conversion probability
-        if variant == "treatment":
-            conv_rate = baseline_rate * (1 + treatment_lift)
-        else:
-            conv_rate = baseline_rate
+        # Pre-experiment activity covariate for CUPED: Beta(2,5), mean ≈ 0.29
+        pre_score = float(np.random.beta(2, 5))
+
+        # Conversion probability correlated with pre_score (creates CUPED-exploitable variance)
+        lift_multiplier = (1 + treatment_lift) if variant == "treatment" else 1.0
+        conv_rate = baseline_rate * (0.5 + pre_score) * lift_multiplier
 
         base_ts = random_ts(days_back)
         device = random.choice(DEVICES)
@@ -132,8 +133,12 @@ def simulate_experiment(
                 "expires_at": expires_at,
             }
 
-        # Each user fires these events
-        events.append(make_event("experiment_exposed", {"experiment_id": exp_id, "variant": variant}))
+        # Each user fires these events; pre_experiment_activity written on the exposed event
+        events.append(make_event("experiment_exposed", {
+            "experiment_id": exp_id,
+            "variant": variant,
+            "pre_experiment_activity": pre_score,
+        }))
         events.append(make_event("page_view", {"path": "/"}, offset_s=random.uniform(0.1, 0.5)))
         events.append(make_event("scroll_depth", {"depth": 25}, offset_s=random.uniform(2, 8)))
 
@@ -142,7 +147,7 @@ def simulate_experiment(
         if converted:
             events.append(make_event(primary_metric, {}, offset_s=random.uniform(10, 60)))
 
-        # Assignment record
+        # Assignment record — includes covariate and conversion outcome for CUPED computation
         assignments.append({
             "PK": f"EXP#{exp_id}",
             "SK": f"ASSIGN#{user_id}",
@@ -153,6 +158,8 @@ def simulate_experiment(
             "variant": variant,
             "assigned_at": base_ts,
             "source": "synthetic",
+            "pre_experiment_activity": pre_score,
+            "converted": converted,
         })
 
         # Tally for SUMMARY items

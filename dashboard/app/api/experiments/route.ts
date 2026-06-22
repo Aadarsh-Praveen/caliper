@@ -2,7 +2,8 @@ import { z } from "zod";
 import { corsResponse, corsOptionsResponse } from "@/lib/cors";
 import { getApiKeyFromRequest, getCustomerByApiKey } from "@/lib/auth";
 import { query, queryOne } from "@/lib/postgres";
-import { getSummary } from "@/lib/dynamodb";
+import { getSummary, ddb, tableName } from "@/lib/dynamodb";
+import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import type { Experiment } from "@/lib/types";
 
 const VariantSchema = z.object({
@@ -49,17 +50,23 @@ export async function GET(req: Request) {
     );
   }
 
-  // Merge in summary stats from DynamoDB
+  // Merge in summary stats + mSPRT from DynamoDB
   const enriched = await Promise.all(
     experiments.map(async (exp) => {
-      const variantStats = await Promise.all(
-        exp.variants.map(async (v) => {
-          const summary = await getSummary(exp.slug, v.name);
-          return { name: v.name, n: summary?.n ?? 0, conversions: summary?.conversions ?? 0 };
-        })
-      );
+      const [variantStats, statsResp] = await Promise.all([
+        Promise.all(
+          exp.variants.map(async (v) => {
+            const summary = await getSummary(exp.slug, v.name);
+            return { name: v.name, n: summary?.n ?? 0, conversions: summary?.conversions ?? 0 };
+          })
+        ),
+        ddb.send(new GetCommand({ TableName: tableName, Key: { PK: `EXP#${exp.slug}`, SK: "STATS#latest" } })).catch(() => null),
+      ]);
       const totalN = variantStats.reduce((acc, v) => acc + v.n, 0);
-      return { ...exp, sample_size: totalN };
+      const statsItem = statsResp?.Item;
+      const msprt_p_value = statsItem?.msprt_p_value != null ? Number(statsItem.msprt_p_value) : null;
+      const msprt_should_stop = statsItem?.msprt_should_stop === true;
+      return { ...exp, sample_size: totalN, msprt_p_value, msprt_should_stop };
     })
   );
 

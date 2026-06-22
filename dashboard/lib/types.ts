@@ -54,6 +54,9 @@ export interface VariantStats {
   conversion_rate: number;
   mean: number;
   variance: number;
+  cuped_adjusted_mean?: number;
+  cuped_adjusted_variance?: number;
+  variance_reduction_pct?: number;
 }
 
 export interface ExperimentResults {
@@ -61,7 +64,10 @@ export interface ExperimentResults {
   variants: VariantStats[];
   lift: number | null;
   lift_ci: [number, number] | null;
+  cuped_lift_ci: [number, number] | null;
   p_value: number | null;
+  msprt_p_value: number | null;
+  msprt_should_stop: boolean;
   is_significant: boolean;
   srm_flag: { observed: Record<string, number>; expected: Record<string, number>; chi2_stat: number; p_value: number } | null;
   segments: never[];

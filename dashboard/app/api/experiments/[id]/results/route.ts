@@ -83,12 +83,78 @@ export async function GET(
     // SRM flag is optional; don't fail the request
   }
 
+  // Read CUPED per-variant stats (written by aggregator Lambda)
+  let cuped_lift_ci: [number, number] | null = null;
+  try {
+    const [ctrlCuped, trtCuped, cupedLatest] = await Promise.all([
+      ddb.send(new GetCommand({ TableName: tableName, Key: { PK: `EXP#${experiment.slug}`, SK: "STATS#cuped#control" } })),
+      ddb.send(new GetCommand({ TableName: tableName, Key: { PK: `EXP#${experiment.slug}`, SK: "STATS#cuped#treatment" } })),
+      ddb.send(new GetCommand({ TableName: tableName, Key: { PK: `EXP#${experiment.slug}`, SK: "STATS#cuped#latest" } })),
+    ]);
+
+    const ctrlItem = ctrlCuped.Item;
+    const trtItem = trtCuped.Item;
+
+    if (ctrlItem && trtItem) {
+      const ctrlVariance = Number(ctrlItem.variance);
+      const trtVariance = Number(trtItem.variance);
+
+      // Attach per-variant CUPED stats to the variant response
+      const ctrlStat = variantStats.find((v) => v.name === "control");
+      const trtStat = variantStats.find((v) => v.name !== "control");
+
+      if (ctrlStat) {
+        ctrlStat.cuped_adjusted_mean = Number(ctrlItem.mean);
+        ctrlStat.cuped_adjusted_variance = ctrlVariance;
+        ctrlStat.variance_reduction_pct =
+          ctrlStat.variance > 0
+            ? Math.max(0, (1 - ctrlVariance / ctrlStat.variance) * 100)
+            : 0;
+      }
+      if (trtStat) {
+        trtStat.cuped_adjusted_mean = Number(trtItem.mean);
+        trtStat.cuped_adjusted_variance = trtVariance;
+        trtStat.variance_reduction_pct =
+          trtStat.variance > 0
+            ? Math.max(0, (1 - trtVariance / trtStat.variance) * 100)
+            : 0;
+      }
+    }
+
+    if (cupedLatest.Item) {
+      cuped_lift_ci = [Number(cupedLatest.Item.ci_low), Number(cupedLatest.Item.ci_high)];
+    }
+  } catch {
+    // CUPED stats are optional; don't fail the request
+  }
+
+  // Read mSPRT always-valid p-value from STATS#latest (written by aggregator Lambda)
+  let msprt_p_value: number | null = null;
+  let msprt_should_stop = false;
+  try {
+    const statsResp = await ddb.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: `EXP#${experiment.slug}`, SK: "STATS#latest" },
+      })
+    );
+    if (statsResp.Item?.msprt_p_value != null) {
+      msprt_p_value = Number(statsResp.Item.msprt_p_value);
+      msprt_should_stop = Boolean(statsResp.Item.msprt_should_stop);
+    }
+  } catch {
+    // mSPRT stats are optional; don't fail the request
+  }
+
   const results: ExperimentResults = {
     experiment,
     variants: variantStats,
     lift: statsResult?.lift ?? null,
     lift_ci: statsResult?.lift_ci ?? null,
+    cuped_lift_ci,
     p_value: statsResult?.p_value ?? null,
+    msprt_p_value,
+    msprt_should_stop,
     is_significant: statsResult?.is_significant ?? false,
     srm_flag,
     segments: [],

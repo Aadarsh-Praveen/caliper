@@ -1,15 +1,18 @@
 """
 Caliper aggregator Lambda — triggered by DynamoDB Streams (batch 100, 5s window).
 Reads EVT# items, increments SUMMARY#variant n/conversions counters (ADD),
-then writes STATS#latest and SRM#detected flags.
+then writes STATS#latest (with mSPRT), STATS#cuped#variant, SRM#detected flags.
 """
 import os, logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 import boto3
-from stats.frequentist import two_proportion_z_test
+from boto3.dynamodb.conditions import Key
+from stats.frequentist import two_proportion_z_test, welch_t_test
 from stats.srm import srm_check
+from stats.cuped import compute_theta, cuped_summary_statistics, variance_reduction_ratio
+from stats.sequential import msprt_p_value, msprt_should_stop
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -25,6 +28,101 @@ EXPECTED_PROPORTIONS = {"control": 0.5, "treatment": 0.5}
 
 
 def _s(v): return v.get("S") if v else None
+
+
+def _query_all_assign_items(exp_id: str) -> list[dict]:
+    """Query all ASSIGN# items for an experiment (paginated)."""
+    items = []
+    kwargs = {
+        "KeyConditionExpression": Key("PK").eq(f"EXP#{exp_id}") & Key("SK").begins_with("ASSIGN#")
+    }
+    while True:
+        resp = table.query(**kwargs)
+        items.extend(resp.get("Items", []))
+        last = resp.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs["ExclusiveStartKey"] = last
+    return items
+
+
+def _compute_cuped(exp_id: str, now: str) -> None:
+    """
+    Query all ASSIGN# items for the experiment, compute CUPED-adjusted stats per variant,
+    and write STATS#cuped#variant + STATS#cuped#latest items.
+
+    Requires ASSIGN# items to have pre_experiment_activity (float) and converted (bool).
+    For live SDK events without covariates, theta ≈ 0 so CUPED is a no-op (correct behaviour).
+    """
+    assign_items = _query_all_assign_items(exp_id)
+    if not assign_items:
+        return
+
+    ctrl_y, ctrl_x = [], []
+    trt_y, trt_x = [], []
+    for item in assign_items:
+        variant = item.get("variant")
+        x = float(item.get("pre_experiment_activity") or 0)
+        y = float(bool(item.get("converted", False)))
+        if variant == "control":
+            ctrl_y.append(y)
+            ctrl_x.append(x)
+        elif variant == "treatment":
+            trt_y.append(y)
+            trt_x.append(x)
+
+    if not ctrl_y or not trt_y:
+        return
+
+    all_y = ctrl_y + trt_y
+    all_x = ctrl_x + trt_x
+    n_all = len(all_x)
+
+    x_grand_mean = sum(all_x) / n_all
+    # theta computed from pooled data (both variants) — using per-variant means would bias the estimate
+    theta = compute_theta(all_y, all_x)
+
+    ctrl_mean_adj, ctrl_var_adj, ctrl_n = cuped_summary_statistics(ctrl_y, ctrl_x, x_grand_mean, theta)
+    trt_mean_adj, trt_var_adj, trt_n = cuped_summary_statistics(trt_y, trt_x, x_grand_mean, theta)
+
+    var_x = sum((xi - x_grand_mean) ** 2 for xi in all_x) / max(n_all - 1, 1)
+    var_y_all = sum((yi - sum(all_y) / n_all) ** 2 for yi in all_y) / max(n_all - 1, 1)
+    vr_ratio = variance_reduction_ratio(theta, var_x, var_y_all)
+
+    for variant, mean_adj, var_adj, n_v in [
+        ("control", ctrl_mean_adj, ctrl_var_adj, ctrl_n),
+        ("treatment", trt_mean_adj, trt_var_adj, trt_n),
+    ]:
+        table.put_item(Item={
+            "PK": f"EXP#{exp_id}", "SK": f"STATS#cuped#{variant}",
+            "n": Decimal(n_v),
+            "mean": Decimal(str(round(mean_adj, 8))),
+            "variance": Decimal(str(round(max(var_adj, 0), 8))),
+            "theta": Decimal(str(round(theta, 8))),
+            "x_grand_mean": Decimal(str(round(x_grand_mean, 8))),
+            "variance_reduction_ratio": Decimal(str(round(vr_ratio, 8))),
+            "computed_at": now,
+        })
+
+    # CUPED CI from Welch's t-test on adjusted values (CLT makes adjusted binary values ~ normal at large n)
+    welch = welch_t_test(ctrl_mean_adj, max(ctrl_var_adj, 1e-12), ctrl_n,
+                         trt_mean_adj, max(trt_var_adj, 1e-12), trt_n)
+    if welch[0] is not None:
+        _, _, cuped_p, cuped_lift, cuped_ci_lo, cuped_ci_hi = welch
+        table.put_item(Item={
+            "PK": f"EXP#{exp_id}", "SK": "STATS#cuped#latest",
+            "lift": Decimal(str(round(cuped_lift, 8))),
+            "p_value": Decimal(str(round(cuped_p, 8))),
+            "ci_low": Decimal(str(round(cuped_ci_lo, 8))),
+            "ci_high": Decimal(str(round(cuped_ci_hi, 8))),
+            "variance_reduction_ratio": Decimal(str(round(vr_ratio, 8))),
+            "theta": Decimal(str(round(theta, 8))),
+            "computed_at": now,
+        })
+        logger.info(
+            "CUPED %s: theta=%.4f vr_ratio=%.3f cuped_ci=[%.4f,%.4f]",
+            exp_id, theta, vr_ratio, cuped_ci_lo, cuped_ci_hi,
+        )
 
 
 def lambda_handler(event, context):
@@ -82,6 +180,13 @@ def _update(exp_id, v_events):
     z, p, lift, ci_lo, ci_hi = two_proportion_z_test(ctrl["conversions"], ctrl["n"], trt["conversions"], trt["n"])
     now = datetime.now(timezone.utc).isoformat()
 
+    # mSPRT always-valid p-value for binary outcomes
+    p_av = msprt_p_value(
+        x1=ctrl["conversions"], n1=ctrl["n"],
+        x2=trt["conversions"], n2=trt["n"],
+    )
+    should_stop = msprt_should_stop(p_av)
+
     if z is not None:
         table.put_item(Item={
             "PK": f"EXP#{exp_id}", "SK": "STATS#latest",
@@ -89,8 +194,14 @@ def _update(exp_id, v_events):
             "lift": Decimal(str(round(lift, 6))), "ci_low": Decimal(str(round(ci_lo, 6))),
             "ci_high": Decimal(str(round(ci_hi, 6))),
             "control_n": Decimal(ctrl["n"]), "treatment_n": Decimal(trt["n"]),
+            "msprt_p_value": Decimal(str(round(p_av, 8))),
+            "msprt_should_stop": should_stop,
             "updated_at": now,
         })
+        logger.info(
+            "STATS %s: z=%.3f p=%.4f lift=%.4f msprt_p=%.4f stop=%s",
+            exp_id, z, p, lift, p_av, should_stop,
+        )
 
     obs = {v: s["n"] for v, s in sums.items() if s["n"] > 0}
     if len(obs) == 2 and sum(obs.values()) >= 100:
@@ -109,3 +220,9 @@ def _update(exp_id, v_events):
                 table.delete_item(Key={"PK": f"EXP#{exp_id}", "SK": "SRM#detected"})
             except Exception:
                 pass
+
+    # CUPED — query ASSIGN# items and compute variance-reduced stats
+    try:
+        _compute_cuped(exp_id, now)
+    except Exception:
+        logger.exception("CUPED failed for %s (non-fatal)", exp_id)

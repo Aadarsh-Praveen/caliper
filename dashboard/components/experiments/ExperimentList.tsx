@@ -31,6 +31,8 @@ function relativeTime(dateStr: string) {
 interface ExperimentWithStats extends Experiment {
   sample_size?: number;
   p_value?: number | null;
+  msprt_p_value?: number | null;
+  msprt_should_stop?: boolean;
 }
 
 interface Props {
@@ -62,6 +64,7 @@ export function ExperimentList({ experiments }: Props) {
             <TableHead className="text-[#888888] font-medium">Primary metric</TableHead>
             <TableHead className="text-[#888888] font-medium text-right">Sample size</TableHead>
             <TableHead className="text-[#888888] font-medium text-right">p-value</TableHead>
+            <TableHead className="text-[#888888] font-medium text-right">Sequential</TableHead>
             <TableHead className="text-[#888888] font-medium text-right">Last activity</TableHead>
           </TableRow>
         </TableHeader>
@@ -90,6 +93,21 @@ export function ExperimentList({ experiments }: Props) {
               </TableCell>
               <TableCell className="text-right font-mono text-sm">
                 {exp.p_value != null ? exp.p_value.toFixed(3) : "—"}
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                {exp.msprt_p_value != null ? (
+                  <span
+                    className={
+                      exp.msprt_should_stop
+                        ? "text-green-400"
+                        : "text-[#888888]"
+                    }
+                  >
+                    {exp.msprt_p_value.toFixed(3)}
+                  </span>
+                ) : (
+                  <span className="text-[#555555]">—</span>
+                )}
               </TableCell>
               <TableCell className="text-right text-[#888888] text-sm">
                 {relativeTime(exp.started_at ?? exp.created_at)}

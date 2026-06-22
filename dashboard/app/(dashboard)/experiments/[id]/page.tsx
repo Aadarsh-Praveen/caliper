@@ -123,7 +123,18 @@ export default function ExperimentDetailPage({
 
   if (!results) return null;
 
-  const { experiment, variants, lift, lift_ci, p_value, is_significant, srm_flag } = results;
+  const {
+    experiment,
+    variants,
+    lift,
+    lift_ci,
+    cuped_lift_ci,
+    p_value,
+    msprt_p_value,
+    msprt_should_stop,
+    is_significant,
+    srm_flag,
+  } = results;
   const control = variants.find((v) => v.name === "control") ?? variants[0];
   const treatment = variants.find((v) => v.name !== "control") ?? variants[1];
 
@@ -205,6 +216,94 @@ export default function ExperimentDetailPage({
           observed={(srm_flag as { observed: Record<string, number> }).observed}
           expected={(srm_flag as { expected: Record<string, number> }).expected}
         />
+      )}
+
+      {/* CUPED Variance Reduction card */}
+      {cuped_lift_ci && (
+        <div className="rounded border border-[#2A2A2A] bg-[#1A1A1A] p-5">
+          <h2 className="text-xs text-[#888888] uppercase tracking-wider mb-4">
+            Variance Reduction (CUPED)
+          </h2>
+          <p className="text-xs text-[#888888] mb-4">
+            Adjusted using pre-experiment activity covariate
+          </p>
+          <div className="grid grid-cols-2 gap-6 mb-4">
+            <div>
+              <div className="text-xs text-[#888888] mb-1">Before CUPED — 95% CI</div>
+              <div className="font-mono text-sm text-[#F5F3EE]">
+                {lift_ci
+                  ? `[${formatPct(lift_ci[0])}, ${formatPct(lift_ci[1])}]`
+                  : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-[#888888] mb-1">After CUPED — 95% CI</div>
+              <div className="font-mono text-sm text-green-400">
+                {`[${formatPct(cuped_lift_ci[0])}, ${formatPct(cuped_lift_ci[1])}]`}
+              </div>
+            </div>
+          </div>
+          {(() => {
+            const ctrl = variants.find((v) => v.name === "control");
+            const avgReduction =
+              ctrl?.variance_reduction_pct != null
+                ? ctrl.variance_reduction_pct.toFixed(1)
+                : null;
+            return avgReduction ? (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-green-400 font-semibold text-sm">
+                  {avgReduction}% variance reduction
+                </span>
+                <span className="text-xs text-[#888888]">(tighter confidence interval)</span>
+              </div>
+            ) : null;
+          })()}
+          <p className="text-xs text-[#555555]">
+            CUPED uses pre-experiment data to remove variance unrelated to treatment effects
+            (Deng, Xu, Kohavi, Walker 2013).
+          </p>
+        </div>
+      )}
+
+      {/* mSPRT Sequential Testing card */}
+      {msprt_p_value != null && (
+        <div className="rounded border border-[#2A2A2A] bg-[#1A1A1A] p-5">
+          <h2 className="text-xs text-[#888888] uppercase tracking-wider mb-4">
+            Always-Valid Inference (mSPRT)
+          </h2>
+          <div className="grid grid-cols-2 gap-6 mb-4">
+            <div>
+              <div className="text-xs text-[#888888] mb-1">Always-valid p-value</div>
+              <div className="text-xl font-semibold text-[#F5F3EE]">
+                {msprt_p_value.toFixed(4)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-[#888888] mb-1">
+                Classical p-value{" "}
+                <span className="text-[#555555] font-normal">(only valid at pre-specified n)</span>
+              </div>
+              <div className="text-xl font-semibold text-[#888888]">
+                {p_value != null ? p_value.toFixed(4) : "—"}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mb-3">
+            {msprt_should_stop ? (
+              <span className="text-green-400 font-semibold text-sm">
+                ✓ Safe to stop
+              </span>
+            ) : (
+              <span className="text-yellow-400 font-semibold text-sm">
+                ⏳ Continue collecting data
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-[#555555]">
+            Unlike classical p-values, this remains valid no matter how often you peek
+            (Johari, Pekelis, Walsh 2015).
+          </p>
+        </div>
       )}
 
       {/* Stats cards */}
