@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy caliper-aggregator Lambda.
-# scipy + numpy are provided by the AWSSDKPandas-Python312-Arm64 Lambda layer.
+# All stats are pure Python (math module only) — no scipy dependency.
 # boto3 is provided by the Lambda runtime.
 # Nothing extra needs to be bundled in the zip.
 set -e

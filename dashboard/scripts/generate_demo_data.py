@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.conditions import Key
 import numpy as np
 
 SEED = 42
@@ -46,6 +47,18 @@ DEVICES = ["desktop"] * 55 + ["mobile"] * 35 + ["tablet"] * 10
 COUNTRIES = ["US"] * 70 + ["UK"] * 15 + ["CA"] * 10 + ["AU"] * 5
 
 
+def to_decimal(obj):
+    """Recursively convert floats in dict/list to Decimal for DynamoDB."""
+    if isinstance(obj, float):
+        # Round to 6 decimal places to keep attribute values clean and avoid NaN/Infinity
+        return Decimal(str(round(obj, 6)))
+    if isinstance(obj, dict):
+        return {k: to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [to_decimal(v) for v in obj]
+    return obj
+
+
 def imul32(a: int, b: int) -> int:
     return (a & 0xFFFFFFFF) * (b & 0xFFFFFFFF) & 0xFFFFFFFF
 
@@ -72,6 +85,37 @@ def random_ts(days_back: int) -> str:
     offset_seconds = random.uniform(0, days_back * 86400)
     dt = now - timedelta(seconds=offset_seconds)
     return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
+def cleanup_experiment_data(table, exp_id: str, verbose: bool) -> int:
+    """
+    Delete all EVT# and ASSIGN# items for an experiment before regenerating.
+
+    Leaves SUMMARY#, STATS#, and SRM# items intact — the aggregator Lambda
+    rewrites those organically as new events stream through.
+    """
+    deleted = 0
+    for prefix in ("EVT#", "ASSIGN#"):
+        kwargs: dict = {
+            "KeyConditionExpression": Key("PK").eq(f"EXP#{exp_id}") & Key("SK").begins_with(prefix),
+            "ProjectionExpression": "PK, SK",
+        }
+        while True:
+            resp = table.query(**kwargs)
+            items = resp.get("Items", [])
+            for i in range(0, len(items), 25):
+                chunk = items[i : i + 25]
+                with table.batch_writer() as bw:
+                    for item in chunk:
+                        bw.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+                deleted += len(chunk)
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                break
+            kwargs["ExclusiveStartKey"] = last
+    if verbose:
+        print(f"  Cleaned up {deleted:,} stale items for {exp_id}")
+    return deleted
 
 
 def simulate_experiment(
@@ -198,21 +242,15 @@ def write_summary_items(table, exp_id: str, summary_counts: dict[str, dict[str, 
 
 
 def batch_write(table, items: list[dict]) -> None:
-    """Write items in batches of 25 using batch_writer."""
+    """Write items in batches of 25 using batch_writer.
+
+    to_decimal is applied to every item recursively so that nested dicts
+    (like 'properties') containing floats are also converted — boto3's
+    DynamoDB resource API rejects Python floats anywhere in the document.
+    """
     with table.batch_writer() as batch:
         for item in items:
-            # Convert numeric values to Decimal for DynamoDB
-            ddb_item = {}
-            for k, v in item.items():
-                if isinstance(v, int) and k != "expires_at":
-                    ddb_item[k] = v
-                elif isinstance(v, int):
-                    ddb_item[k] = v
-                elif isinstance(v, float):
-                    ddb_item[k] = Decimal(str(v))
-                else:
-                    ddb_item[k] = v
-            batch.put_item(Item=ddb_item)
+            batch.put_item(Item=to_decimal(item))
 
 
 def main() -> None:
@@ -229,9 +267,18 @@ def main() -> None:
     total_events = 0
     total_users = 0
     total_assignments = 0
+    total_cleaned = 0
 
     if args.verbose:
-        print(f"Generating data for {args.n_users:,} users per experiment over {args.days_back} days...")
+        print(f"Cleaning up stale EVT# and ASSIGN# items for {len(EXPERIMENTS)} experiments...")
+
+    # Delete stale EVT# and ASSIGN# items first to prevent partial-run inconsistency.
+    # SUMMARY#, STATS#, and SRM# items are left for the aggregator to rewrite.
+    for exp_id in EXPERIMENTS:
+        total_cleaned += cleanup_experiment_data(table, exp_id, verbose=args.verbose)
+
+    if args.verbose:
+        print(f"\nGenerating data for {args.n_users:,} users per experiment over {args.days_back} days...")
 
     for exp_id, cfg in EXPERIMENTS.items():
         events, assignments, summary_counts = simulate_experiment(
@@ -254,7 +301,9 @@ def main() -> None:
         total_assignments += len(assignments)
 
     elapsed = time.time() - start
-    print(f"\n✓ Generated {total_events:,} events across {len(EXPERIMENTS)} experiments")
+    if total_cleaned:
+        print(f"✓ Cleaned up {total_cleaned:,} stale items")
+    print(f"✓ Generated {total_events:,} events across {len(EXPERIMENTS)} experiments")
     if not args.verbose:
         for exp_id in EXPERIMENTS:
             print(f"  {exp_id}")
