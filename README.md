@@ -47,7 +47,7 @@ Tools like Statsig and Eppo solve these problems well, but they're priced for es
 
 ### Data flow detail
 
-The diagram below shows the same architecture as a Mermaid graph — useful for understanding edges and relationships:
+The diagram below shows the same architecture as a Mermaid graph:
 
 ![Caliper Mermaid architecture](docs/mermaid.png)
 
@@ -258,7 +258,6 @@ Caliper is a hackathon submission with a clearly bounded scope. The following we
 - **Notifications** — no Slack, email, or webhook alerts
 - **Mobile SDKs** — JavaScript SDK only
 
-Keeping scope tight meant the features that are here could be built carefully.
 
 ---
 
