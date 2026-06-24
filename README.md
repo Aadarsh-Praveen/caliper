@@ -43,47 +43,15 @@ Tools like Statsig and Eppo solve these problems well, but they're priced for es
 
 ![Caliper architecture](docs/architecture.png)
 
-```mermaid
-graph LR
-  subgraph Client
-    A[Headphones Demo Site]
-    A --> B[Caliper JS SDK]
-  end
+*A B2B experimentation platform: lightweight SDK ingests events through Vercel API routes, dual-writes to DynamoDB (hot) and Aurora (warm); DynamoDB Streams trigger the real-time aggregator Lambda; dbt runs on a 15-minute schedule via EventBridge; Bedrock generates AI readouts on-demand.*
 
-  subgraph Vercel["Vercel - Dashboard and API"]
-    B --> C["/api/assign"]
-    B --> D["/api/ingest"]
-    E[Dashboard UI]
-  end
+### Data flow detail
 
-  subgraph AWS["AWS - Data and Compute"]
-    C --> F[("DynamoDB<br/>caliper-main")]
-    D --> F
-    D --> G[("Aurora PostgreSQL<br/>raw_events")]
-    F -.streams.-> H["Aggregator Lambda<br/>Python pure stats"]
-    H --> F
-    I["EventBridge cron<br/>every 15 min"] --> J["dbt-runner Lambda<br/>containerized"]
-    J --> G
-    K["Bedrock<br/>Claude Haiku 4.5"]
-  end
+The diagram below shows the same architecture as a Mermaid graph — useful for understanding edges and relationships:
 
-  E --> F
-  E --> G
-  E --> K
+![Caliper Mermaid architecture](docs/mermaid.png)
 
-  classDef clientNode stroke:#818cf8,fill:#eef2ff
-  classDef vercelNode stroke:#38bdf8,fill:#f0f9ff
-  classDef awsNode stroke:#4ade80,fill:#f0fdf4
-  classDef database stroke:#a78bfa,fill:#f5f3ff
-  classDef lambda stroke:#facc15,fill:#fefce8
-  classDef ai stroke:#fb923c,fill:#fff7ed
 
-  class A,B clientNode
-  class C,D,E vercelNode
-  class F,G database
-  class H,I,J lambda
-  class K ai
-```
 
 **Request flow, step by step:**
 
