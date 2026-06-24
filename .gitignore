@@ -70,4 +70,9 @@ notes.txt
 notes.md
 *.local
 
-CLAUDE_CODE_PHASE_2_PROMPT.md
+# AI assistant scaffolding (build-time, not for distribution)
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
+CLAUDE_CODE_*
