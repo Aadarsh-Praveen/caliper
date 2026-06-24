@@ -1,4 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { VariantStats } from "@/lib/types";
 
 interface Props {
@@ -12,34 +11,50 @@ function formatPct(n: number) {
 
 export function StatsCard({ stat, isControl }: Props) {
   return (
-    <Card className="bg-[#1A1A1A] border-[#2A2A2A] flex-1">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-[#888888] uppercase tracking-wider">
+    <div className={`flex-1 rounded-xl border bg-white p-5 shadow-sm ${isControl ? "border-slate-200" : "border-[#3b82f6]/25"}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
           {stat.name}
-          {isControl && (
-            <span className="ml-2 text-[10px] bg-[#2A2A2A] text-[#888888] px-1.5 py-0.5 rounded">
-              control
-            </span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div>
-          <div className="text-3xl font-bold text-[#F5F3EE]">{stat.n.toLocaleString()}</div>
-          <div className="text-xs text-[#888888] mt-0.5">users</div>
+        </span>
+        {isControl ? (
+          <span className="text-[10px] bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full font-semibold tracking-wide">
+            control
+          </span>
+        ) : (
+          <span className="text-[10px] bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20 px-2 py-0.5 rounded-full font-semibold tracking-wide">
+            treatment
+          </span>
+        )}
+      </div>
+
+      {/* Sample size */}
+      <div className="mb-4">
+        <div className="text-3xl font-bold text-[#1e293b] tracking-tight tabular-nums">
+          {stat.n.toLocaleString()}
         </div>
-        <div>
-          <div className="text-xl font-semibold text-[#F5F3EE]">
-            {formatPct(stat.conversion_rate)}
-          </div>
-          <div className="text-xs text-[#888888] mt-0.5">conversion rate</div>
+        <div className="text-[11px] text-slate-400 mt-0.5 uppercase tracking-wider">users</div>
+      </div>
+
+      <div className="border-t border-slate-100 mb-4" />
+
+      {/* Conversion rate */}
+      <div>
+        <div className={`text-2xl font-semibold tabular-nums ${!isControl ? "text-[#3b82f6]" : "text-slate-800"}`}>
+          {formatPct(stat.conversion_rate)}
         </div>
-        <div>
-          <div className="text-sm text-[#888888]">
-            {stat.conversions.toLocaleString()} conversions
-          </div>
+        <div className="text-[11px] text-slate-400 mt-0.5 uppercase tracking-wider">
+          conversion rate
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      {/* Conversion count */}
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <span className="text-xs text-slate-400 tabular-nums">
+          {stat.conversions.toLocaleString()}{" "}
+          <span className="text-slate-300">conversions</span>
+        </span>
+      </div>
+    </div>
   );
 }

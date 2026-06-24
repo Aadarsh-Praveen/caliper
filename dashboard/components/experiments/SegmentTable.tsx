@@ -17,24 +17,23 @@ function formatLift(control: SegmentRow | undefined, treatment: SegmentRow | und
 }
 
 function liftColor(control: SegmentRow | undefined, treatment: SegmentRow | undefined): string {
-  if (!control || !treatment) return "text-[#888888]";
+  if (!control || !treatment) return "text-slate-300";
   const diff = treatment.conversion_rate - control.conversion_rate;
-  if (Math.abs(diff) < 0.001) return "text-[#888888]";
-  return diff > 0 ? "text-green-400" : "text-red-400";
+  if (Math.abs(diff) < 0.001) return "text-slate-400";
+  return diff > 0 ? "text-green-600" : "text-red-500";
 }
 
 export function SegmentTable({ segments }: { segments: SegmentRow[] }) {
   if (!segments || segments.length === 0) {
     return (
-      <div className="rounded border border-[#2A2A2A] bg-[#1A1A1A] p-6 text-center">
-        <p className="text-sm text-[#888888]">
+      <div className="py-8 text-center">
+        <p className="text-xs text-slate-400">
           Segment analysis pending — dbt runs every 15 minutes.
         </p>
       </div>
     );
   }
 
-  // Group by dimension, then by segment_value → { control, treatment }
   const byDimension = new Map<string, Map<string, SegmentGroup>>();
 
   for (const row of segments) {
@@ -51,32 +50,47 @@ export function SegmentTable({ segments }: { segments: SegmentRow[] }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {Array.from(byDimension.entries()).map(([dimension, byValue]) => (
-        <div key={dimension} className="rounded border border-[#2A2A2A] bg-[#1A1A1A]">
-          <div className="px-5 py-3 border-b border-[#2A2A2A]">
-            <span className="text-xs text-[#888888] uppercase tracking-wider">{dimension}</span>
+        <div key={dimension} className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+            <span className="text-[11px] text-slate-400 uppercase tracking-widest font-semibold">
+              {dimension}
+            </span>
           </div>
-          <table className="w-full text-sm">
+
+          <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-[#2A2A2A]">
-                <th className="text-left px-5 py-2 text-xs text-[#888888] font-normal">Value</th>
-                <th className="text-right px-5 py-2 text-xs text-[#888888] font-normal">Control (n, rate)</th>
-                <th className="text-right px-5 py-2 text-xs text-[#888888] font-normal">Treatment (n, rate)</th>
-                <th className="text-right px-5 py-2 text-xs text-[#888888] font-normal">Lift</th>
+              <tr className="border-b border-slate-100 bg-white">
+                <th className="text-left px-4 py-2 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Segment</th>
+                <th className="text-right px-4 py-2 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Control</th>
+                <th className="text-right px-4 py-2 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Treatment</th>
+                <th className="text-right px-4 py-2 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Lift</th>
               </tr>
             </thead>
             <tbody>
               {Array.from(byValue.entries()).map(([value, { control, treatment }]) => (
-                <tr key={value} className="border-b border-[#1E1E1E] last:border-0">
-                  <td className="px-5 py-2 text-[#F5F3EE] font-mono">{value}</td>
-                  <td className="px-5 py-2 text-right text-[#888888] font-mono">
-                    {control ? `${control.n.toLocaleString()}, ${formatPct(control.conversion_rate)}` : "—"}
+                <tr key={value} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-2.5 text-slate-800 font-mono font-medium">{value}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-500 font-mono tabular-nums">
+                    {control ? (
+                      <>
+                        <span className="text-slate-800">{control.n.toLocaleString()}</span>
+                        <span className="text-slate-300 mx-1">/</span>
+                        {formatPct(control.conversion_rate)}
+                      </>
+                    ) : <span className="text-slate-200">—</span>}
                   </td>
-                  <td className="px-5 py-2 text-right text-[#888888] font-mono">
-                    {treatment ? `${treatment.n.toLocaleString()}, ${formatPct(treatment.conversion_rate)}` : "—"}
+                  <td className="px-4 py-2.5 text-right text-slate-500 font-mono tabular-nums">
+                    {treatment ? (
+                      <>
+                        <span className="text-slate-800">{treatment.n.toLocaleString()}</span>
+                        <span className="text-slate-300 mx-1">/</span>
+                        {formatPct(treatment.conversion_rate)}
+                      </>
+                    ) : <span className="text-slate-200">—</span>}
                   </td>
-                  <td className={`px-5 py-2 text-right font-mono font-semibold ${liftColor(control, treatment)}`}>
+                  <td className={`px-4 py-2.5 text-right font-mono font-semibold tabular-nums ${liftColor(control, treatment)}`}>
                     {formatLift(control, treatment)}
                   </td>
                 </tr>

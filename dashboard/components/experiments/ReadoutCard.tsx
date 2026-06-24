@@ -9,12 +9,12 @@ interface Props {
   apiKey: string;
 }
 
-const VERDICT_LABELS: Record<string, { text: string; color: string }> = {
-  treatment_wins: { text: "Treatment Wins", color: "text-emerald-400" },
-  control_wins: { text: "Control Wins", color: "text-emerald-400" },
-  no_significant_difference: { text: "No Significant Difference", color: "text-zinc-400" },
-  srm_invalidated: { text: "Results Invalid (SRM)", color: "text-red-400" },
-  insufficient_data: { text: "Insufficient Data", color: "text-yellow-400" },
+const VERDICT_CONFIG: Record<string, { label: string; color: string; border: string; bg: string; dotColor: string }> = {
+  treatment_wins:            { label: "Treatment Wins",     color: "text-green-700",  border: "border-green-200",  bg: "bg-green-50",   dotColor: "bg-green-500" },
+  control_wins:              { label: "Control Wins",       color: "text-blue-700",   border: "border-blue-200",   bg: "bg-blue-50",    dotColor: "bg-blue-500"  },
+  no_significant_difference: { label: "No Difference",     color: "text-slate-700",  border: "border-slate-200",  bg: "bg-slate-50",   dotColor: "bg-slate-400" },
+  srm_invalidated:           { label: "Invalid (SRM)",     color: "text-red-700",    border: "border-red-200",    bg: "bg-red-50",     dotColor: "bg-red-500"   },
+  insufficient_data:         { label: "Insufficient Data", color: "text-amber-700",  border: "border-amber-200",  bg: "bg-amber-50",   dotColor: "bg-amber-500" },
 };
 
 const CONFIDENCE_LABELS: Record<string, string> = {
@@ -48,52 +48,76 @@ export function ReadoutCard({ experimentId, initialReadout, apiKey }: Props) {
 
   if (!readout) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-6 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-zinc-400">AI Readout</h3>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest">AI Readout</span>
+            <span className="text-[9px] bg-slate-100 text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded font-medium">
+              Bedrock · Haiku 4.5
+            </span>
+          </div>
           <button
             onClick={regenerate}
             disabled={loading}
-            className="text-xs px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-zinc-950 disabled:opacity-50"
+            className="text-[11px] px-3 py-1.5 rounded-md bg-[#3b82f6] text-white font-semibold hover:bg-[#2563eb] disabled:opacity-40 transition-colors"
           >
-            {loading ? "Generating..." : "Generate readout"}
+            {loading ? (
+              <span className="flex items-center gap-1.5">
+                <svg width="9" height="9" viewBox="0 0 9 9" fill="none" className="animate-spin" aria-hidden>
+                  <circle cx="4.5" cy="4.5" r="3" stroke="white" strokeWidth="1.5" opacity="0.3" />
+                  <path d="M4.5 1.5A3 3 0 0 1 7.5 4.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+                Generating…
+              </span>
+            ) : "Generate"}
           </button>
         </div>
-        <p className="text-sm text-zinc-500">
-          {error ||
-            "Click 'Generate readout' to get a plain-English summary of this experiment, powered by Amazon Bedrock and Claude Haiku 4.5."}
-        </p>
+        <div className="px-4 py-4">
+          {error
+            ? <p className="text-xs text-red-500">{error}</p>
+            : <p className="text-xs text-slate-400 leading-relaxed">Get a plain-English summary powered by Amazon Bedrock and Claude Haiku 4.5.</p>
+          }
+        </div>
       </div>
     );
   }
 
-  const verdict = VERDICT_LABELS[readout.verdict] ?? { text: readout.verdict, color: "text-zinc-400" };
+  const verdict = VERDICT_CONFIG[readout.verdict] ?? VERDICT_CONFIG.no_significant_difference;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-6 mb-6">
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">AI Readout</div>
-          <h3 className={`text-lg font-semibold ${verdict.color}`}>{verdict.text}</h3>
-          <div className="text-xs text-zinc-500 mt-1">
-            {CONFIDENCE_LABELS[readout.confidence] ?? readout.confidence} &middot;{" "}
-            Generated {new Date(readout.generated_at).toLocaleString()}
-          </div>
+    <div className={`rounded-xl border overflow-hidden shadow-sm ${verdict.border} ${verdict.bg}`}>
+      <div className={`flex items-center justify-between px-4 py-3 border-b ${verdict.border}`}>
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full ${verdict.dotColor}`} />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest">AI Readout</span>
+          <span className="text-[9px] bg-white text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded font-medium">
+            Bedrock · Haiku 4.5
+          </span>
         </div>
         <button
           onClick={regenerate}
           disabled={loading}
-          className="text-xs px-3 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-300 disabled:opacity-50"
+          className="text-[11px] px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-500 hover:text-slate-800 disabled:opacity-40 transition-colors"
         >
-          {loading ? "..." : "Regenerate"}
+          {loading ? "…" : "↺"}
         </button>
       </div>
-      <p className="text-sm text-zinc-200 leading-relaxed mb-3">{readout.summary}</p>
-      <p className="text-sm text-amber-400">
-        <span className="text-zinc-500">Recommendation: </span>
-        {readout.recommendation}
-      </p>
-      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+
+      <div className="px-4 pt-3 pb-1">
+        <div className={`text-sm font-bold ${verdict.color}`}>{verdict.label}</div>
+        <div className="text-[10px] text-slate-400 mt-0.5">
+          {CONFIDENCE_LABELS[readout.confidence] ?? readout.confidence} · {new Date(readout.generated_at).toLocaleDateString()}
+        </div>
+      </div>
+
+      <div className="px-4 pb-4 mt-2 space-y-2.5">
+        <p className="text-xs text-slate-800 leading-relaxed">{readout.summary}</p>
+        <div className="border-t border-slate-200/70 pt-2.5">
+          <span className="text-[10px] text-slate-400 uppercase tracking-wider">Recommendation</span>
+          <p className="text-xs text-[#3b82f6] font-medium leading-relaxed mt-1">{readout.recommendation}</p>
+        </div>
+        {error && <p className="text-[11px] text-red-500">{error}</p>}
+      </div>
     </div>
   );
 }

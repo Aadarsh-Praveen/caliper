@@ -2,6 +2,8 @@ import { z } from "zod";
 import { corsResponse, corsOptionsResponse } from "@/lib/cors";
 import { getApiKeyFromRequest, getCustomerByApiKey } from "@/lib/auth";
 import { batchPutEvents } from "@/lib/dynamodb";
+import { waitUntil } from "@vercel/functions";
+import { insertRawEvents } from "@/lib/postgres-batch";
 
 const EventSchema = z.object({
   event_name: z.string().min(1),
@@ -42,6 +44,7 @@ export async function POST(req: Request) {
 
   const { user_id, events } = parsed.data;
 
+  // DynamoDB write — hot path, must succeed
   await batchPutEvents(
     events.map((e) => ({
       experimentId: e.experiment_id,
@@ -51,6 +54,24 @@ export async function POST(req: Request) {
       context: e.context,
       ts: e.ts,
     }))
+  );
+
+  // Aurora dual-write — fire-and-forget, failures don't block the response
+  // experiment_id from the SDK payload is already the slug (matches raw_events convention)
+  waitUntil(
+    insertRawEvents(
+      events.map((e) => ({
+        experiment_id: e.experiment_id,
+        user_id,
+        variant: e.variant,
+        event_name: e.event_name,
+        properties: e.properties,
+        context: e.context,
+        ts: e.ts,
+      }))
+    ).catch((err) => {
+      console.warn("[ingest] Aurora dual-write failed:", err);
+    })
   );
 
   return corsResponse({ ingested: events.length }, 202);

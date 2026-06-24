@@ -4,6 +4,7 @@ import { getApiKeyFromRequest, getCustomerByApiKey } from "@/lib/auth";
 import { query, queryOne } from "@/lib/postgres";
 import { getSummary, ddb, tableName } from "@/lib/dynamodb";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { computeExperimentResults } from "@/lib/experiment-results";
 import type { Experiment } from "@/lib/types";
 
 const VariantSchema = z.object({
@@ -70,7 +71,32 @@ export async function GET(req: Request) {
     })
   );
 
-  return corsResponse(enriched);
+  // Count SRM alerts across running experiments (reuses already-loaded full Experiment objects)
+  let srmAlerts = 0;
+  for (const exp of experiments) {
+    if (exp.status !== "running") continue;
+    try {
+      const results = await computeExperimentResults(exp);
+      if (results?.srm_flag) srmAlerts += 1;
+    } catch (err) {
+      console.warn(`Failed SRM check for ${exp.id}:`, err);
+    }
+  }
+
+  const readoutsRow = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text as count
+     FROM readouts r
+     JOIN experiments e ON r.experiment_id = e.id
+     WHERE e.customer_id = $1`,
+    [customer.id]
+  );
+  const readoutsGenerated = parseInt(readoutsRow?.count || "0", 10);
+
+  return corsResponse({
+    experiments: enriched,
+    srm_alerts: srmAlerts,
+    readouts_generated: readoutsGenerated,
+  });
 }
 
 export async function POST(req: Request) {

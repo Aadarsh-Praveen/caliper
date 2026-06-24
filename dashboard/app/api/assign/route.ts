@@ -3,6 +3,8 @@ import { getApiKeyFromRequest, getCustomerByApiKey } from "@/lib/auth";
 import { getAssignment, putAssignment } from "@/lib/dynamodb";
 import { queryOne } from "@/lib/postgres";
 import { assignVariant } from "@/lib/hash";
+import { waitUntil } from "@vercel/functions";
+import { insertRawAssignment } from "@/lib/postgres-batch";
 import type { Experiment } from "@/lib/types";
 
 export async function OPTIONS() {
@@ -46,10 +48,26 @@ export async function GET(req: Request) {
 
   // Re-read in case of a race to get the canonical assignment
   const final = await getAssignment(experiment_id, user_id);
+  const assignedVariant = final?.variant ?? variant;
+  const assignedAt = final?.assigned_at ?? new Date().toISOString();
+
+  // Aurora dual-write — fire-and-forget, failures don't block the response
+  // experiment_id param is already the slug (confirmed by WHERE slug = $1 lookup above)
+  waitUntil(
+    insertRawAssignment({
+      experiment_id: experiment.slug,
+      user_id,
+      variant: assignedVariant,
+      pre_experiment_activity: null,
+      assigned_at: assignedAt,
+    }).catch((err) => {
+      console.warn("[assign] Aurora dual-write failed:", err);
+    })
+  );
 
   return corsResponse({
-    variant: final?.variant ?? variant,
+    variant: assignedVariant,
     experiment_id,
-    assigned_at: final?.assigned_at ?? new Date().toISOString(),
+    assigned_at: assignedAt,
   });
 }
