@@ -41,7 +41,7 @@ Tools like Statsig and Eppo solve these problems well, but they're priced for es
 
 ## Architecture
 
-\<TODO: insert architecture diagram image here — e.g. docs/architecture.png\>
+![Caliper architecture](docs/architecture.png)
 
 ```mermaid
 graph LR
