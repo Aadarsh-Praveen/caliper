@@ -2,9 +2,10 @@
 
 > Statistical rigor without the price tag.
 
-A B2B A/B testing platform with always-valid sequential testing, AI-generated experiment readouts, and a real-time statistics engine. Built solo in 22 days for the [H0 Hackathon](https://h01.devpost.com/) (Track 2: Monetizable B2B).
+A B2B A/B testing platform with always-valid sequential testing, AI-generated experiment readouts, and a real-time statistics engine.
 
-**[Live Dashboard](https://caliper-xi.vercel.app)** · **[Live Demo Site](\<TODO: web URL\>)** · **Demo Video** \<TODO: link after recording\>
+
+**[Live Dashboard](https://caliper-xi.vercel.app)** · **[Live Demo Site](https://caliper-r5q3.vercel.app/)** · **Demo Video** \<TODO: link after recording\>
 
 ---
 
@@ -49,26 +50,39 @@ graph LR
     A --> B[Caliper JS SDK]
   end
 
-  subgraph "Vercel — Dashboard and API"
-    B --> C[/api/assign]
-    B --> D[/api/ingest]
+  subgraph Vercel["Vercel - Dashboard and API"]
+    B --> C["/api/assign"]
+    B --> D["/api/ingest"]
     E[Dashboard UI]
   end
 
-  subgraph "AWS — Data and Compute"
-    C --> F[(DynamoDB\ncaliper-main)]
+  subgraph AWS["AWS - Data and Compute"]
+    C --> F[("DynamoDB<br/>caliper-main")]
     D --> F
-    D --> G[(Aurora PostgreSQL\nraw_events)]
-    F -.streams.-> H[Aggregator Lambda\nPython pure stats]
+    D --> G[("Aurora PostgreSQL<br/>raw_events")]
+    F -.streams.-> H["Aggregator Lambda<br/>Python pure stats"]
     H --> F
-    I[EventBridge cron\nevery 15 min] --> J[dbt-runner Lambda\ncontainerized]
+    I["EventBridge cron<br/>every 15 min"] --> J["dbt-runner Lambda<br/>containerized"]
     J --> G
-    K[Bedrock\nClaude Haiku 4.5]
+    K["Bedrock<br/>Claude Haiku 4.5"]
   end
 
   E --> F
   E --> G
   E --> K
+
+  classDef clientNode stroke:#818cf8,fill:#eef2ff
+  classDef vercelNode stroke:#38bdf8,fill:#f0f9ff
+  classDef awsNode stroke:#4ade80,fill:#f0fdf4
+  classDef database stroke:#a78bfa,fill:#f5f3ff
+  classDef lambda stroke:#facc15,fill:#fefce8
+  classDef ai stroke:#fb923c,fill:#fff7ed
+
+  class A,B clientNode
+  class C,D,E vercelNode
+  class F,G database
+  class H,I,J lambda
+  class K ai
 ```
 
 **Request flow, step by step:**
@@ -281,8 +295,6 @@ Keeping scope tight meant the features that are here could be built carefully.
 ---
 
 ## Acknowledgments
-
-Built solo by **Aadarsh Praveen** for the H0 Hackathon, June 2026.
 
 Statistical methods draw from:
 
