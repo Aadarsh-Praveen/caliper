@@ -130,6 +130,22 @@ def _compute_cuped(exp_id: str, now: str) -> None:
 
 
 def lambda_handler(event, context):
+    """
+    DynamoDB Streams entrypoint — aggregates events and writes experiment statistics.
+
+    Processes a batch of DynamoDB Stream records (up to 100 items, 5s window) and:
+    1. Groups EVT# records by experiment and variant, increments SUMMARY# counters.
+    2. Counts new ASSIGN# inserts per variant, increments ASSIGN_COUNT# atomically.
+    3. For each affected experiment, runs two-proportion z-test + mSPRT, SRM check,
+       and CUPED variance-reduction, writing results back to DynamoDB.
+
+    Args:
+        event: DynamoDB Streams event dict with a "Records" list.
+        context: Lambda context object (unused, present for the Lambda interface).
+
+    Returns:
+        Dict with {"processed": <record_count>}.
+    """
     by_exp = defaultdict(lambda: defaultdict(list))
     # Counts of new unique assignments per (exp_id, variant) in this batch
     assign_incs = defaultdict(lambda: defaultdict(int))
@@ -189,6 +205,17 @@ def lambda_handler(event, context):
 
 
 def _update(exp_id, v_events):
+    """
+    Increment SUMMARY counters, compute z-test + mSPRT stats, run SRM check, and trigger CUPED.
+
+    Called once per affected experiment after each Lambda batch. Writes STATS#latest and
+    SRM#detected (or deletes SRM#detected when the split recovers) to DynamoDB, then
+    delegates CUPED computation to _compute_cuped.
+
+    Args:
+        exp_id: Experiment slug, e.g. "hero_cta_test".
+        v_events: Dict mapping variant name to list of event_name strings from this batch.
+    """
     pm = PRIMARY_METRICS.get(exp_id)
 
     # Increment SUMMARY counters from experiment_exposed / primary metric events

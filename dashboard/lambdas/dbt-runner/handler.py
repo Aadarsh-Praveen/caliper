@@ -10,6 +10,22 @@ import json
 
 
 def lambda_handler(event, context):
+    """
+    EventBridge cron entrypoint — runs dbt on Aurora every 15 minutes.
+
+    Invokes `dbt run` then `dbt test` via a subprocess wrapper (run_dbt.py) that patches
+    multiprocessing.synchronize before importing dbt, working around the missing /dev/shm
+    in Lambda containers. All writable paths are redirected to /tmp (Lambda's only writable
+    directory). A dbt test failure returns HTTP 200 with a warning rather than 500 so the
+    EventBridge rule doesn't retry on transient test flaps.
+
+    Args:
+        event: EventBridge scheduled event (contents unused).
+        context: Lambda context object (aws_request_id used for logging).
+
+    Returns:
+        Dict with statusCode and a body JSON string indicating run/test outcomes.
+    """
     print(f"[dbt-runner] Starting run at {context.aws_request_id if context else 'local'}")
 
     # Verify env vars
@@ -80,6 +96,7 @@ def lambda_handler(event, context):
 
 
 def error_response(message, detail=""):
+    """Return a Lambda error response dict and log the message to CloudWatch."""
     print(f"[ERROR] {message} {detail}")
     return {
         "statusCode": 500,

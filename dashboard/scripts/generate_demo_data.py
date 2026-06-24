@@ -63,11 +63,17 @@ def to_decimal(obj):
 
 
 def imul32(a: int, b: int) -> int:
+    """Simulate JavaScript's 32-bit integer multiply (Math.imul), ignoring overflow."""
     return (a & 0xFFFFFFFF) * (b & 0xFFFFFFFF) & 0xFFFFFFFF
 
 
 def cyrb53(s: str, seed: int = 0) -> int:
-    """Exact port of the JS cyrb53 hash used in the SDK and dashboard/lib/hash.ts."""
+    """
+    Exact port of the JS cyrb53 hash used in the SDK and dashboard/lib/hash.ts.
+
+    This must produce bit-for-bit identical output to the TypeScript version so that
+    assign_variant_hash matches the SDK's variant assignment for the same user_id.
+    """
     h1 = (0xDEADBEEF ^ seed) & 0xFFFFFFFF
     h2 = (0x41C6CE57 ^ seed) & 0xFFFFFFFF
     for ch in s:
@@ -80,10 +86,12 @@ def cyrb53(s: str, seed: int = 0) -> int:
 
 
 def assign_variant_hash(user_id: str, experiment_id: str) -> str:
+    """Deterministically assign a variant using the same cyrb53-based hash as the browser SDK."""
     return "control" if cyrb53(f"{user_id}:{experiment_id}") % 100 < 50 else "treatment"
 
 
 def random_ts(days_back: int) -> str:
+    """Return a random ISO 8601 timestamp (UTC) uniformly distributed over the past days_back days."""
     now = datetime.now(timezone.utc)
     offset_seconds = random.uniform(0, days_back * 86400)
     dt = now - timedelta(seconds=offset_seconds)
@@ -131,7 +139,26 @@ def simulate_experiment(
     srm: bool,
     verbose: bool,
 ) -> tuple[list[dict], list[dict], dict]:
-    """Returns (events, assignments, summary_counts)."""
+    """
+    Generate synthetic events and assignments for one experiment.
+
+    Conversion probability is correlated with the pre_experiment_activity covariate
+    (drawn from Beta(2, 5)) so that CUPED variance reduction has real signal to exploit.
+    When srm=True, assignments are skewed 60/40 instead of 50/50 to trigger SRM detection.
+
+    Args:
+        exp_id: Experiment slug, e.g. "hero_cta_test".
+        n_users: Number of users to simulate.
+        days_back: Events are spread uniformly across this many past days.
+        baseline_rate: Control group base conversion rate.
+        treatment_lift: Relative lift applied to the treatment conversion rate.
+        primary_metric: Event name that counts as a conversion.
+        srm: If True, assign 60% to control to deliberately trigger SRM.
+        verbose: Print per-variant counts if True.
+
+    Returns:
+        Tuple of (events, assignments, summary_counts) ready for batch write.
+    """
     events = []
     assignments = []
     summary_counts: dict[str, dict[str, int]] = {
@@ -245,6 +272,7 @@ def write_summary_items(table, exp_id: str, summary_counts: dict[str, dict[str, 
 
 
 def get_aurora_conn() -> psycopg.Connection:
+    """Open a psycopg3 connection to Aurora, appending sslmode=require if not already set."""
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise SystemExit("DATABASE_URL env var not set — cannot write to Aurora")

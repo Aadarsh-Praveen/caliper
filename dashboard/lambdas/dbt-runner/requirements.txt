@@ -1,2 +1,3 @@
-# Dependencies are installed in the Dockerfile via pip install dbt-core dbt-postgres.
-# This file is a placeholder; nothing is installed from here.
+dbt-core==1.8.0
+dbt-postgres==1.8.0
+psycopg2-binary==2.9.9

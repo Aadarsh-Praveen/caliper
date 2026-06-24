@@ -4,6 +4,18 @@ import { query, queryOne } from "@/lib/postgres";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import type { Experiment, ExperimentResults, VariantStats, Readout, SegmentRow } from "@/lib/types";
 
+/**
+ * Compute the full statistical results for a single experiment.
+ *
+ * Fetches SUMMARY# counters, STATS# (z-test + mSPRT), SRM#detected, and STATS#cuped#*
+ * items from DynamoDB in parallel, then reads the latest readout and segment breakdowns
+ * from Aurora. Used by the experiment detail page, the comparison API, and the readout
+ * generation endpoint. All DynamoDB sub-fetches are wrapped in try/catch so optional
+ * stats (SRM, CUPED, mSPRT) degrade gracefully if not yet computed.
+ *
+ * @param experiment - Experiment row from Aurora (must include slug, variants, metric_type).
+ * @returns ExperimentResults with variant stats, lift, CI, p-values, SRM flag, and readout.
+ */
 export async function computeExperimentResults(
   experiment: Experiment
 ): Promise<ExperimentResults> {

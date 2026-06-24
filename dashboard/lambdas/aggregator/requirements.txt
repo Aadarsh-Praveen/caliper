@@ -1,4 +1,3 @@
-# Local test dependencies only.
-# scipy and numpy are provided at runtime by the AWSSDKPandas-Python312-Arm64 Lambda layer.
-scipy~=1.14.0
-numpy~=2.0.0
+# Lambda environment provides boto3 + numpy + pandas via the AWSSDKPandas-Python312-Arm64 layer.
+# No external pip dependencies needed — all statistical computations are pure Python (math module only).
+# This file is intentionally empty.

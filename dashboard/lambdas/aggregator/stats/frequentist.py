@@ -1,4 +1,14 @@
-"""Frequentist statistics for A/B test analysis — pure Python, no scipy."""
+"""
+Frequentist statistics for A/B test analysis — pure Python, no scipy.
+
+Provides two-proportion z-test and Welch's t-test for the aggregator Lambda.
+All normal and t-distribution computations use math.erf and the AS241 rational
+approximation (Wichura 1988) so the module runs without scipy in the Lambda
+environment, where the AWSSDKPandas layer does not include scipy.
+
+Reference: Wichura (1988) "Algorithm AS241: The Percentage Points of the Normal
+Distribution." Applied Statistics 37(3), 477–484.
+"""
 import math
 
 
@@ -7,14 +17,34 @@ import math
 # ---------------------------------------------------------------------------
 
 def _normal_cdf(z: float) -> float:
-    """Standard normal CDF via math.erf (C library, full float64 precision)."""
+    """
+    Compute the standard normal CDF Φ(z).
+
+    Uses math.erf, which provides C library precision (~10^-15 accuracy).
+    This replaces scipy.stats.norm.cdf to eliminate the scipy dependency from
+    the Lambda runtime.
+
+    Args:
+        z: Standard normal z-score.
+
+    Returns:
+        P(Z ≤ z) where Z ~ N(0, 1), in the range [0, 1].
+    """
     return (1.0 + math.erf(z / math.sqrt(2.0))) / 2.0
 
 
 def _normal_ppf(p: float) -> float:
     """
-    Standard normal quantile (probit) accurate to ~1e-9.
-    Implements AS241 (Wichura 1988) rational approximation.
+    Inverse of the standard normal CDF — given a probability, return the z-score.
+
+    Implements the AS241 algorithm (Wichura 1988), a rational polynomial approximation
+    accurate to ~10^-9 over the full range (0, 1). Pure Python, no scipy.
+
+    Args:
+        p: Probability in (0, 1).
+
+    Returns:
+        The z such that Φ(z) = p.
     """
     # Coefficients for the central region |p - 0.5| <= 0.425
     a = (
@@ -187,12 +217,22 @@ def two_proportion_z_test(
     x1: int, n1: int, x2: int, n2: int
 ) -> "tuple[float, float, float, float, float] | tuple[None, None, None, None, None]":
     """
-    Two-proportion z-test (treatment minus control).
+    Two-proportion z-test (treatment minus control) for binary metrics.
 
-    Returns: (z_stat, p_value, lift, ci_low, ci_high)
-      lift = p2 - p1 (absolute difference, treatment minus control)
-      ci is 95% Wald interval on the difference
-    Returns all-None tuple if inputs are invalid.
+    Uses a pooled standard error for the z-statistic and an unpooled (Wald) standard
+    error for the 95% confidence interval on the absolute difference, following the
+    standard asymptotic approach for large samples.
+
+    Args:
+        x1: Control conversions.
+        n1: Control sample size.
+        x2: Treatment conversions.
+        n2: Treatment sample size.
+
+    Returns:
+        Tuple (z_stat, p_value, lift, ci_low, ci_high) where lift = p2 - p1
+        (absolute difference, treatment minus control) and ci is the 95% Wald interval.
+        Returns a tuple of five Nones if inputs are invalid (n < 1 or se = 0).
     """
     if n1 < 1 or n2 < 1:
         return None, None, None, None, None
@@ -226,11 +266,24 @@ def welch_t_test(
     n2: int,
 ) -> "tuple[float, float, float, float, float, float] | tuple[None, None, None, None, None, None]":
     """
-    Welch's t-test for continuous metrics with unequal variances.
-    Uses Satterthwaite approximation for degrees of freedom.
+    Welch's t-test for continuous metrics with unequal group variances.
 
-    Returns: (t_stat, df, p_value, lift, ci_low, ci_high)
-    Returns all-None if variance is zero or n < 2.
+    Uses the Satterthwaite approximation for effective degrees of freedom and an
+    exact t-quantile (via betainc Newton solver) for the 95% CI — no normal approximation.
+    Also used downstream for CUPED-adjusted binary metrics, where the CLT makes adjusted
+    values approximately normal at large n.
+
+    Args:
+        mean1: Control sample mean.
+        var1: Control sample variance (unbiased, ddof=1).
+        n1: Control sample size.
+        mean2: Treatment sample mean.
+        var2: Treatment sample variance (unbiased, ddof=1).
+        n2: Treatment sample size.
+
+    Returns:
+        Tuple (t_stat, df, p_value, lift, ci_low, ci_high) where lift = mean2 - mean1.
+        Returns a tuple of six Nones if n < 2 or variance is zero.
     """
     if n1 < 2 or n2 < 2 or var1 <= 0 or var2 <= 0:
         return None, None, None, None, None, None

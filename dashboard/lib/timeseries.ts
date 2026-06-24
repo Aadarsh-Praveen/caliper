@@ -16,6 +16,18 @@ export interface KpiSparklineSeries {
   readouts_generated: KpiDailyPoint[];
 }
 
+/**
+ * Fetch 7-day cumulative sparkline series for the dashboard KPI cards.
+ *
+ * Returns six time series (active experiments, total events, total users,
+ * average CUPED variance reduction, SRM alerts, readouts generated). Counts are
+ * cumulative (running totals up to each day) rather than daily deltas. CUPED and SRM
+ * values have no historical snapshots so they are flatlined at the current value
+ * across all 7 days.
+ *
+ * @param customerId - Aurora customer UUID used to scope experiments.
+ * @returns Object with six named KpiDailyPoint arrays, each covering the past 7 days.
+ */
 export async function getKpiTimeseries(customerId: string): Promise<KpiSparklineSeries> {
   // Cumulative experiment count per day (experiments created on or before that day)
   const activeRows = await query<{ day: string; count: number }>(
@@ -179,6 +191,18 @@ export async function getDailyMetricVolume(): Promise<DailyMetricVolume[]> {
   return rows;
 }
 
+/**
+ * Compute cumulative daily lift between treatment and control for one experiment.
+ *
+ * Uses two CTEs — cumulative_assignments and cumulative_conversions — joined on day and
+ * variant to produce daily running totals. Lift is computed as (treatment_rate - control_rate)
+ * / control_rate * 100, with zero-protection when control_rate is 0. Used by the
+ * lift-over-time chart on the experiment detail page.
+ *
+ * @param experimentSlug - Experiment ID string (e.g. "hero_cta_test").
+ * @param primaryMetric - Event name that counts as a conversion (e.g. "add_to_cart").
+ * @returns Array of daily rows with per-variant counts, rates, and relative lift percentage.
+ */
 export async function getExperimentDailyLift(
   experimentSlug: string,
   primaryMetric: string
@@ -254,6 +278,18 @@ export async function getExperimentDailyLift(
   });
 }
 
+/**
+ * Build a four-step conversion funnel for one experiment.
+ *
+ * Steps: Assigned → Exposed → <most frequent non-primary event> → <primary metric>.
+ * The intermediate step is dynamically selected as the highest-volume non-conversion
+ * event, so the funnel adapts to each experiment's event taxonomy. Drop-off percentages
+ * are computed relative to the previous step; the first step has null drop-off.
+ *
+ * @param experimentSlug - Experiment ID string.
+ * @param primaryMetric - Event name that represents conversion (the final funnel step).
+ * @returns Four FunnelStep objects in order from widest to narrowest.
+ */
 export async function getExperimentFunnel(
   experimentSlug: string,
   primaryMetric: string

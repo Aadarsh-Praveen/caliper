@@ -17,9 +17,14 @@ const client = new DynamoDBClient({
   },
 });
 
+/** DynamoDB Document client configured with the project's AWS credentials. */
 export const ddb = DynamoDBDocumentClient.from(client);
 export const tableName = env.DYNAMODB_TABLE_NAME;
 
+/**
+ * Write a single event to DynamoDB with a 30-day TTL.
+ * SK format: EVT#<tsMs>#<userId>#<eventName> — sortable by time, unique per event type per ms.
+ */
 export async function putEvent(
   experimentId: string,
   userId: string,
@@ -51,6 +56,10 @@ export async function putEvent(
   );
 }
 
+/**
+ * Batch-write events to DynamoDB in chunks of 25 (the DynamoDB BatchWrite limit).
+ * Deduplicates within the batch by PK+SK so duplicate client-side fires are silently dropped.
+ */
 export async function batchPutEvents(
   events: Array<{
     experimentId: string;
@@ -102,6 +111,10 @@ export async function batchPutEvents(
   }
 }
 
+/**
+ * Look up an existing variant assignment for a user in a given experiment.
+ * Returns null if the user has not yet been assigned.
+ */
 export async function getAssignment(
   experimentId: string,
   userId: string
@@ -119,6 +132,11 @@ export async function getAssignment(
   return { variant: result.Item.variant, assigned_at: result.Item.assigned_at };
 }
 
+/**
+ * Write a variant assignment to DynamoDB, guarded by ConditionExpression attribute_not_exists(SK).
+ * Silently ignores ConditionalCheckFailedException (assignment already exists) so this is
+ * safe to call on every SDK track() call without re-assigning returning users.
+ */
 export async function putAssignment(
   experimentId: string,
   userId: string,
@@ -155,6 +173,11 @@ export async function putAssignment(
   }
 }
 
+/**
+ * Read the aggregated SUMMARY# item for one variant of an experiment.
+ * Returns n (exposures), conversions, sum (Σy), and sum_sq (Σy²) for both
+ * binary and continuous metric support. Returns null if no data exists yet.
+ */
 export async function getSummary(
   experimentId: string,
   variant: string

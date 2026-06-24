@@ -71,13 +71,19 @@ def srm_check(
     alpha: float = 0.0001,
 ) -> "tuple[float, float, bool]":
     """
-    Chi-squared test for sample ratio mismatch.
+    Chi-squared goodness-of-fit test for sample ratio mismatch.
 
-    observed_counts: {"control": 5234, "treatment": 4766}
-    expected_proportions: {"control": 0.5, "treatment": 0.5}
-    alpha: significance level for SRM detection (default 0.0001 — matches Statsig/Eppo production)
+    Uses a very conservative alpha (0.0001) to avoid false positives — SRM detection
+    should only fire when randomization is clearly broken, not on normal statistical
+    variation. This matches the threshold used by Statsig and Eppo in production.
 
-    Returns: (chi2_stat, p_value, is_srm)
+    Args:
+        observed_counts: Per-variant assignment counts, e.g. {"control": 5234, "treatment": 4766}.
+        expected_proportions: Intended traffic split, e.g. {"control": 0.5, "treatment": 0.5}.
+        alpha: Significance level for SRM detection. Default 0.0001.
+
+    Returns:
+        Tuple (chi2_stat, p_value, is_srm) where is_srm is True if p_value < alpha.
     """
     total = sum(observed_counts.values())
     if total == 0:

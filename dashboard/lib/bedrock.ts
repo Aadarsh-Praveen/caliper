@@ -61,6 +61,19 @@ Output exactly this JSON shape, no other text:
   "confidence": "high" | "medium" | "low"
 }`;
 
+/**
+ * Generate a plain-English A/B test readout via Amazon Bedrock (Claude).
+ *
+ * Sends experiment statistics to the configured Bedrock model with a structured prompt
+ * that instructs the model to produce a JSON response. Falls back to BEDROCK_FALLBACK_MODEL_ID
+ * if the primary model throws. The prompt enforces strict verdict types:
+ * "treatment_wins" | "control_wins" | "no_significant_difference" | "srm_invalidated" | "insufficient_data".
+ * SRM detection always overrides to "srm_invalidated" regardless of p-value.
+ *
+ * @param input - Experiment statistics and metadata for the prompt.
+ * @returns Parsed readout with verdict, summary, recommendation, and confidence.
+ * @throws {Error} If the Bedrock response does not contain parseable JSON or is missing required fields.
+ */
 export async function generateReadout(input: BedrockReadoutInput): Promise<BedrockReadout> {
   const userPrompt = buildUserPrompt(input);
 

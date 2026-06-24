@@ -40,5 +40,21 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Build/working docs
-docs/
+# Python (for the scripts/ and lambdas/ subdirs)
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# dbt
+analytics/target/
+analytics/dbt_packages/
+analytics/logs/
+analytics/.user.yml
+
+# Lambda build artifacts
+lambdas/*/build/
+lambdas/*/*.zip
+
+# Docker
+.docker/
